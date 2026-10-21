@@ -21,19 +21,43 @@ const LegalCaseSchema = new mongoose.Schema(
       trim: true,
     },
 
+    judgeNames: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+
+    decisionDate: {
+      type: Date,
+    },
+
+    caseType: {
+      type: String,
+      trim: true,
+      default: 'General',
+    },
+
     summary: {
       type: String,
       required: [true, 'Case summary is required'],
+      trim: true,
     },
 
     fullText: {
       type: String,
       default: '',
+      trim: true,
     },
 
     keywords: {
       type: [String],
       default: [],
+    },
+
+    verdict: {
+      type: String,
+      trim: true,
+      default: '',
     },
   },
   {

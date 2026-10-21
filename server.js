@@ -4,6 +4,7 @@ const cors = require('cors');
 const connectDB = require('./config/db');
 const searchRoutes = require('./routes/searchRoutes');
 const { seedCases } = require('./controllers/searchController');
+const adminCaseRoutes = require('./routes/adminCaseRoutes');
 
 // Load environment variables from .env file
 dotenv.config();
@@ -29,6 +30,9 @@ app.use('/api/search', searchRoutes);
 
 // Dev-only: seed sample legal cases → GET /api/seed
 app.get('/api/seed', seedCases);
+
+// Admin Case Management Routes
+app.use('/api/admin/cases', adminCaseRoutes);
 
 // ─── 404 Handler ──────────────────────────────────────────────────────────────
 app.use((req, res) => {

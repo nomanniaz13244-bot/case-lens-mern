@@ -1,5 +1,10 @@
 # Dependencies
 node_modules/
+**/node_modules/
+
+# Build artifacts
+dist/
+**/dist/
 
 # Environment Variables (keep secrets safe!)
 .env
