@@ -2,6 +2,8 @@ const express = require('express');
 const dotenv = require('dotenv');
 const cors = require('cors');
 const connectDB = require('./config/db');
+const searchRoutes = require('./routes/searchRoutes');
+const { seedCases } = require('./controllers/searchController');
 
 // Load environment variables from .env file
 dotenv.config();
@@ -20,6 +22,17 @@ app.use(express.json());
 // Health-check / root route
 app.get('/', (req, res) => {
   res.json({ success: true, message: 'Case Lens AI API Running' });
+});
+
+// Legal Search Module
+app.use('/api/search', searchRoutes);
+
+// Dev-only: seed sample legal cases → GET /api/seed
+app.get('/api/seed', seedCases);
+
+// ─── 404 Handler ──────────────────────────────────────────────────────────────
+app.use((req, res) => {
+  res.status(404).json({ success: false, message: `Route ${req.originalUrl} not found` });
 });
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
