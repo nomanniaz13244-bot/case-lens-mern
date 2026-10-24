@@ -6,6 +6,7 @@ const searchRoutes = require('./routes/searchRoutes');
 const { seedCases } = require('./controllers/searchController');
 const adminCaseRoutes = require('./routes/adminCaseRoutes');
 const authRoutes = require('./routes/authRoutes');
+const aiRoutes = require('./routes/aiRoutes');
 
 // Load environment variables from .env file
 dotenv.config();
@@ -37,6 +38,9 @@ app.get('/api/seed', seedCases);
 
 // Admin Case Management Routes
 app.use('/api/admin/cases', adminCaseRoutes);
+
+// AI Legal Chat Module
+app.use('/api/ai', aiRoutes);
 
 // ─── 404 Handler ──────────────────────────────────────────────────────────────
 app.use((req, res) => {

@@ -1,4 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
+import axios from 'axios';
+
+const AI_API_URL = 'http://localhost:5000/api/ai/chat';
 
 // Preset sample conversation topics for the sidebar
 const INITIAL_CONVERSATIONS = [
@@ -73,85 +76,20 @@ How can I assist your legal matter today?`,
     inputRef.current?.focus();
   }, []);
 
-  // Mock function to simulate AI Legal Response
-  const generateMockLegalResponse = (userQuery) => {
-    const q = userQuery.toLowerCase();
-
-    if (q.includes('bail') || q.includes('498') || q.includes('497') || q.includes('arrest')) {
-      return `### ⚖️ Legal Analysis: Pre-Arrest Bail under Section 498 Cr.P.C.
-
-**1. Statutory Framework:**
-Section 498 read with Section 497 of the Code of Criminal Procedure (Cr.P.C.), 1898 governs the grant of bail before arrest. It is an extraordinary relief intended to protect innocent citizens from humiliation and unwarranted arrest.
-
-**2. Mandatory Judicial Criteria:**
-To succeed in a pre-arrest bail petition, the petitioner must demonstrate:
-- **Ulterior Motives & Mala Fide:** Clear evidence that the complainant or investigating agency is motivated by malice, harassment, or extraneous considerations (*PLD 2021 SC 892*).
-- **Physical Remand Not Required:** The recovery has already been effected or custodial interrogation is unnecessary for the investigation.
-- **Prima Facie Inculpation Absent:** Reasonable grounds to believe that the accused is not guilty of a non-bailable offense.
-
-**3. Recommended Strategy:**
-Ensure that documentary evidence demonstrating personal enmity or civil disputes is annexed with the petition to substantiate the allegation of *mala fides*.`;
-    }
-
-    if (q.includes('writ') || q.includes('199') || q.includes('constitution') || q.includes('184')) {
-      return `### 🏛️ Constitutional Law Analysis: Article 199 Jurisdiction
-
-**1. Prerequisites for Constitutional Writs:**
-Under Article 199 of the Constitution:
-- **No Other Adequate Alternate Remedy:** The petitioner must show that no alternate, efficacious remedy is provided by law, or that the available remedy is illusory or onerous (*2022 SCMR 134*).
-- **Aggrieved Party Standing:** The applicant must possess a direct, recognizable interest in the violation of a fundamental or legal right.
-
-**2. Common Forms of Writs:**
-- **Certiorari:** To quash quasi-judicial orders passed without jurisdiction or in excess of lawful authority.
-- **Mandamus:** To compel a public authority to perform a statutory duty prescribed by law.
-- **Prohibition:** To restrain subordinate forums from proceeding beyond jurisdiction.
-
-**3. Citation Reference:**
-*Federation of Pakistan vs. Gulzar Ahmed (PLD 2024 SC 182)* reaffirms that discretionary writ relief will not be withheld where fundamental rights under Part II Chapter 1 are blatantly infringed.`;
-    }
-
-    if (q.includes('contract') || q.includes('damages') || q.includes('breach')) {
-      return `### 📜 Commercial Law Analysis: Breach of Contract & Damages
-
-**1. Governing Statute:**
-Sections 73 and 74 of the **Contract Act, 1872** govern the consequences of a breach of contract:
-- **Direct & Natural Consequences:** Only compensation for loss naturally arising in the usual course of things from such breach is recoverable. Remote or indirect damage cannot be granted.
-- **Mitigation Principle:** The aggrieved party is legally bound to take all reasonable steps to mitigate the loss incurred.
-
-**2. Liquidated vs. Unliquidated Damages:**
-Under Section 74, even if a predetermined penalty amount is stipulated in the agreement, the Court will only award *reasonable compensation* not exceeding the stipulated penalty, based on actual proved loss.`;
-    }
-
-    // Default intelligent legal analysis template
-    return `### 📑 Legal Opinion & Case Analysis
-
-Thank you for your inquiry regarding: **"${userQuery}"**
-
-**1. Statutory Context & Legal Principles:**
-Under established jurisprudence, this subject matter involves the interpretation of applicable procedural and substantive enactments. The courts apply a purposive construction while safeguarding fundamental liberties and procedural fairness.
-
-**2. Key Precedent & Doctrinal Ratio:**
-- The courts consistently examine whether the grievance satisfies the statutory threshold before granting discretionary relief.
-- Established precedents require that all material assertions be substantiated by contemporaneous documentary records.
-
-**3. Actionable Next Steps:**
-1. Verify the relevant statutory timelines (Limitation Act schedules).
-2. Gather corresponding certified copies of public records and official notifications.
-3. Formulate the petition prayer with specific and distinct declaratory reliefs.
-
-*Would you like me to draft formal petition grounds or search specific case citations from the database?*`;
-  };
-
-  const handleSend = () => {
+  const handleSend = async () => {
     const trimmed = inputPrompt.trim();
     if (!trimmed || isTyping) return;
 
-    const userMessageId = `user-${Date.now()}`;
+    const timestamp = new Date().toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
     const userMessage = {
-      id: userMessageId,
+      id: `user-${Date.now()}`,
       sender: 'user',
       text: trimmed,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp,
     };
 
     // Append user message immediately
@@ -159,19 +97,61 @@ Under established jurisprudence, this subject matter involves the interpretation
     setInputPrompt('');
     setIsTyping(true);
 
-    // Simulate AI thinking and response delay (mock function)
-    setTimeout(() => {
-      const responseText = generateMockLegalResponse(trimmed);
+    try {
+      const res = await axios.post(
+        AI_API_URL,
+        { message: trimmed, question: trimmed },
+        { headers: { 'Content-Type': 'application/json' }, timeout: 30000 }
+      );
+
+      const payload = res.data?.data ?? res.data ?? {};
+      const responseText =
+        payload.answer ||
+        payload.response ||
+        payload.reply ||
+        payload.message ||
+        (typeof payload === 'string' ? payload : '');
+      const citedCases =
+        payload.citedCases || payload.citations || payload.cases || [];
+
+      if (!responseText) {
+        throw new Error('The AI service returned an empty response.');
+      }
+
       const assistantMessage = {
         id: `ai-${Date.now()}`,
         sender: 'assistant',
         text: responseText,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        citedCases: Array.isArray(citedCases) ? citedCases : [],
+        timestamp: new Date().toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
+    } catch (err) {
+      const detail =
+        err.response?.data?.message ||
+        err.message ||
+        'Unable to reach the AI service.';
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `ai-error-${Date.now()}`,
+          sender: 'assistant',
+          isError: true,
+          text: `I could not complete that request. ${detail} Please ensure the AI backend is running on port 5000 and try again.`,
+          timestamp: new Date().toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+        },
+      ]);
+    } finally {
       setIsTyping(false);
-    }, 900);
+    }
   };
 
   const handleKeyDown = (e) => {
@@ -388,7 +368,9 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
                   className={`max-w-[85%] md:max-w-[78%] rounded-2xl p-4 text-sm leading-relaxed ${
                     msg.sender === 'user'
                       ? 'bg-sky-600 text-white rounded-br-none shadow-md shadow-sky-600/20'
-                      : 'bg-slate-800/90 text-slate-200 border border-slate-700/70 rounded-bl-none shadow-sm'
+                      : msg.isError
+                        ? 'bg-rose-950/60 text-rose-200 border border-rose-800/60 rounded-bl-none shadow-sm'
+                        : 'bg-slate-800/90 text-slate-200 border border-slate-700/70 rounded-bl-none shadow-sm'
                   }`}
                 >
                   {/* Sender Header for Assistant */}
@@ -403,6 +385,54 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
                   <div className="whitespace-pre-wrap space-y-2">
                     {msg.text}
                   </div>
+
+                  {/* Cited Cases for Assistant Messages */}
+                  {msg.sender === 'assistant' &&
+                    Array.isArray(msg.citedCases) &&
+                    msg.citedCases.length > 0 && (
+                      <div className="mt-3 pt-2.5 border-t border-slate-700/50">
+                        <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-sky-400">
+                          Cited Cases
+                        </p>
+                        <div className="space-y-2">
+                          {msg.citedCases.map((cited, idx) => {
+                            const isString = typeof cited === 'string';
+                            const title = isString
+                              ? cited
+                              : cited.caseTitle || cited.title || cited.name || 'Legal Authority';
+                            const citation = isString ? '' : cited.citation;
+                            const court = isString ? '' : cited.courtName || cited.court;
+                            const summary = isString ? '' : cited.summary;
+
+                            return (
+                              <div
+                                key={cited._id || `${msg.id}-cite-${idx}`}
+                                className="rounded-lg border border-slate-700/60 bg-slate-900/70 px-3 py-2"
+                              >
+                                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                                  <span className="text-xs font-semibold text-slate-200">
+                                    {title}
+                                  </span>
+                                  {citation && (
+                                    <span className="font-mono text-[10px] font-semibold text-sky-400">
+                                      {citation}
+                                    </span>
+                                  )}
+                                </div>
+                                {court && (
+                                  <p className="mt-0.5 text-[10px] text-slate-400">{court}</p>
+                                )}
+                                {summary && (
+                                  <p className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-slate-400">
+                                    {summary}
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
 
                   {/* Actions Bar for Assistant Messages */}
                   {msg.sender === 'assistant' && (
@@ -440,11 +470,11 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
                 <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-sky-600 to-indigo-600 flex items-center justify-center text-white text-sm flex-shrink-0 shadow-md shadow-sky-500/20">
                   ⚖️
                 </div>
-                <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl rounded-bl-none px-4 py-3 text-sm flex items-center gap-1.5">
-                  <span className="text-xs text-slate-400 mr-1 font-medium">Analyzing legal corpus</span>
-                  <span className="w-1.5 h-1.5 bg-sky-400 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
-                  <span className="w-1.5 h-1.5 bg-sky-400 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
-                  <span className="w-1.5 h-1.5 bg-sky-400 rounded-full animate-bounce"></span>
+                <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl rounded-bl-none px-4 py-3 text-sm flex items-center gap-2">
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-600 border-t-sky-400" />
+                  <span className="text-xs text-slate-400 font-medium">
+                    Analyzing legal corpus...
+                  </span>
                 </div>
               </div>
             )}
