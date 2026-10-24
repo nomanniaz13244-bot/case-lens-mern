@@ -5,6 +5,7 @@ const connectDB = require('./config/db');
 const searchRoutes = require('./routes/searchRoutes');
 const { seedCases } = require('./controllers/searchController');
 const adminCaseRoutes = require('./routes/adminCaseRoutes');
+const authRoutes = require('./routes/authRoutes');
 
 // Load environment variables from .env file
 dotenv.config();
@@ -24,6 +25,9 @@ app.use(express.json());
 app.get('/', (req, res) => {
   res.json({ success: true, message: 'Case Lens AI API Running' });
 });
+
+// Authentication Module
+app.use('/api/auth', authRoutes);
 
 // Legal Search Module
 app.use('/api/search', searchRoutes);
