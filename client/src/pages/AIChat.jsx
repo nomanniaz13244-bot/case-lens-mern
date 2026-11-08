@@ -56,13 +56,12 @@ How can I assist your legal matter today?`,
   const [isTyping, setIsTyping] = useState(false);
   const [activeChatId, setActiveChatId] = useState('1');
   const [chatHistory, setChatHistory] = useState(INITIAL_CONVERSATIONS);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [copiedId, setCopiedId] = useState(null);
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
-  // Auto-scroll to bottom whenever messages change
+  // Au to bottom whenever messages change
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -101,7 +100,7 @@ How can I assist your legal matter today?`,
       const res = await axios.post(
         AI_API_URL,
         { message: trimmed, question: trimmed },
-        { headers: { 'Content-Type': 'application/json' }, timeout: 30000 }
+        { headers: { 'Content-Type': 'application/json' }, timeout: 60000 }
       );
 
       const payload = res.data?.data ?? res.data ?? {};
@@ -185,99 +184,16 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
   };
 
   return (
-    <div className="flex h-screen bg-slate-900 text-slate-100 font-sans overflow-hidden">
-      {/* ─── Left Sidebar (ChatGPT-style) ────────────────────────────────────── */}
-      <aside
-        className={`${
-          sidebarOpen ? 'w-72' : 'w-0'
-        } transition-all duration-300 ease-in-out bg-slate-950 border-r border-slate-800 flex flex-col flex-shrink-0 relative overflow-hidden`}
-      >
-        {/* Sidebar Brand Header */}
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-sky-600 to-indigo-600 flex items-center justify-center text-white font-bold shadow-md shadow-sky-500/20">
-              ⚖️
-            </div>
-            <div>
-              <h2 className="font-bold text-sm tracking-wide text-white">Case Lens AI</h2>
-              <p className="text-xs text-sky-400 font-medium">Legal Research Suite</p>
-            </div>
-          </div>
-          <button
-            onClick={() => setSidebarOpen(false)}
-            className="md:hidden text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
-          >
-            ✕
-          </button>
-        </div>
-
-        {/* New Chat Button */}
-        <div className="p-3">
-          <button
-            onClick={handleNewChat}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-sky-600 to-sky-700 hover:from-sky-500 hover:to-sky-600 text-white font-semibold text-sm transition-all shadow-md shadow-sky-600/25 active:scale-[0.98]"
-          >
-            <span className="text-base font-bold">+</span>
-            <span>New Research Chat</span>
-          </button>
-        </div>
-
-        {/* Chat History List */}
-        <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1">
-          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider px-2 py-1">
-            Recent Consultations
-          </div>
-          {chatHistory.map((chat) => (
-            <button
-              key={chat.id}
-              onClick={() => setActiveChatId(chat.id)}
-              className={`w-full text-left px-3 py-2.5 rounded-lg flex items-center gap-2.5 transition-colors text-sm group ${
-                activeChatId === chat.id
-                  ? 'bg-slate-800/80 text-white font-medium border border-slate-700/60'
-                  : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
-              }`}
-            >
-              <span className="text-slate-500 group-hover:text-sky-400 text-xs">💬</span>
-              <span className="truncate flex-1">{chat.title}</span>
-            </button>
-          ))}
-        </div>
-
-        {/* Sidebar Footer User Badge */}
-        <div className="p-3 border-t border-slate-800/80 bg-slate-950/70">
-          <div className="flex items-center gap-3 p-2 rounded-xl bg-slate-900/60 border border-slate-800">
-            <div className="w-8 h-8 rounded-full bg-sky-600 text-white flex items-center justify-center font-bold text-xs">
-              JT
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-slate-200 truncate">Advocate Jawad</p>
-              <p className="text-[10px] text-emerald-400 flex items-center gap-1 font-medium">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                CaseLens Pro Active
-              </p>
-            </div>
-          </div>
-        </div>
-      </aside>
-
+    <div className="flex h-screen bg-[#F5F5F5] text-[#1A1A1A] font-sans overflow-hidden">
       {/* ─── Main Chat Interface ─────────────────────────────────────────────── */}
-      <main className="flex-1 flex flex-col h-full bg-slate-900 relative">
+      <main className="flex-1 flex flex-col h-full bg-[#F5F5F5] relative">
         {/* Top Navbar */}
-        <header className="h-14 border-b border-slate-800/80 bg-slate-900/90 backdrop-blur px-4 flex items-center justify-between z-10">
+        <header className="h-14 border-b border-gray-200 bg-white px-4 flex items-center justify-between z-10">
           <div className="flex items-center gap-3">
-            {!sidebarOpen && (
-              <button
-                onClick={() => setSidebarOpen(true)}
-                className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition"
-                title="Open Sidebar"
-              >
-                ☰
-              </button>
-            )}
             <div className="flex items-center gap-2">
               <span className="text-lg">🤖</span>
-              <h1 className="font-semibold text-slate-100 text-sm md:text-base">AI Legal Assistant</h1>
-              <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-sky-950 text-sky-400 border border-sky-800">
+              <h1 className="font-semibold text-[#1A1A1A] text-sm md:text-base">AI Legal Assistant</h1>
+              <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border border-gray-200 bg-[#F5F5F5] text-[#000000]">
                 GPT-4 Legal Core v1.1
               </span>
             </div>
@@ -286,7 +202,7 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
           <div className="flex items-center gap-2">
             <a
               href="/"
-              className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition font-medium border border-slate-700/50"
+              className="text-xs px-3 py-1.5 rounded-lg bg-white text-gray-700 hover:text-[#1A1A1A] transition font-medium border border-gray-300"
             >
               ⚖️ Case Repository
             </a>
@@ -301,7 +217,7 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
                   },
                 ]);
               }}
-              className="text-xs px-2.5 py-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 transition"
+              className="text-xs px-2.5 py-1.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-[#1A1A1A] transition"
               title="Clear Conversation"
             >
               Clear
@@ -315,11 +231,11 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
           {messages.length === 1 && (
             <div className="max-w-3xl mx-auto my-6">
               <div className="text-center mb-6">
-                <div className="inline-flex p-3 rounded-2xl bg-sky-500/10 border border-sky-500/20 text-sky-400 text-3xl mb-3">
+                <div className="inline-flex p-3 rounded-2xl border border-gray-200 bg-white text-3xl mb-3">
                   ⚖️
                 </div>
-                <h3 className="text-lg md:text-xl font-bold text-slate-100">AI Legal Intelligence Platform</h3>
-                <p className="text-xs md:text-sm text-slate-400 mt-1">
+                <h3 className="text-lg md:text-xl font-bold text-[#1A1A1A]">AI Legal Intelligence Platform</h3>
+                <p className="text-xs md:text-sm text-gray-600 mt-1">
                   Select a research template below or type your legal question directly
                 </p>
               </div>
@@ -332,13 +248,13 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
                       setInputPrompt(item.prompt);
                       inputRef.current?.focus();
                     }}
-                    className="p-3.5 rounded-xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 hover:border-sky-500/50 text-left transition-all group flex flex-col justify-between"
+                    className="p-3.5 rounded-xl border border-gray-200 bg-white hover:border-[#000000] text-left transition-all group flex flex-col justify-between"
                   >
-                    <div className="font-semibold text-xs md:text-sm text-slate-200 group-hover:text-sky-400 flex items-center justify-between">
+                    <div className="font-semibold text-xs md:text-sm text-[#1A1A1A] flex items-center justify-between">
                       <span>{item.title}</span>
-                      <span className="text-slate-500 group-hover:text-sky-400 text-xs">→</span>
+                      <span className="text-[#000000] text-xs">→</span>
                     </div>
-                    <div className="text-[11px] md:text-xs text-slate-400 mt-1 line-clamp-2">
+                    <div className="text-[11px] md:text-xs text-gray-600 mt-1 line-clamp-2">
                       {item.description}
                     </div>
                   </button>
@@ -358,7 +274,7 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
               >
                 {/* Assistant Avatar */}
                 {msg.sender === 'assistant' && (
-                  <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-sky-600 to-indigo-600 flex items-center justify-center text-white text-sm flex-shrink-0 shadow-md shadow-sky-500/20 mt-1">
+                  <div className="w-8 h-8 rounded-xl bg-[#000000] flex items-center justify-center text-white text-sm flex-shrink-0 shadow-sm mt-1">
                     ⚖️
                   </div>
                 )}
@@ -367,17 +283,17 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
                 <div
                   className={`max-w-[85%] md:max-w-[78%] rounded-2xl p-4 text-sm leading-relaxed ${
                     msg.sender === 'user'
-                      ? 'bg-sky-600 text-white rounded-br-none shadow-md shadow-sky-600/20'
+                      ? 'bg-[#000000] text-white rounded-br-none shadow-md '
                       : msg.isError
-                        ? 'bg-rose-950/60 text-rose-200 border border-rose-800/60 rounded-bl-none shadow-sm'
-                        : 'bg-slate-800/90 text-slate-200 border border-slate-700/70 rounded-bl-none shadow-sm'
+                        ? '  border  rounded-bl-none shadow-sm'
+                        : 'bg-white text-[#1A1A1A] border border-gray-200 rounded-bl-none shadow-sm'
                   }`}
                 >
                   {/* Sender Header for Assistant */}
                   {msg.sender === 'assistant' && (
-                    <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-700/50">
-                      <span className="font-semibold text-xs text-sky-400">Case Lens AI Assistant</span>
-                      <span className="text-[10px] text-slate-400">{msg.timestamp}</span>
+                    <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-gray-200">
+                      <span className="font-semibold text-xs text-[#000000]">Case Lens AI Assistant</span>
+                      <span className="text-[10px] text-gray-500">{msg.timestamp}</span>
                     </div>
                   )}
 
@@ -390,8 +306,8 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
                   {msg.sender === 'assistant' &&
                     Array.isArray(msg.citedCases) &&
                     msg.citedCases.length > 0 && (
-                      <div className="mt-3 pt-2.5 border-t border-slate-700/50">
-                        <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-sky-400">
+                      <div className="mt-3 pt-2.5 border-t border-gray-300/50">
+                        <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-[#1A1A1A]">
                           Cited Cases
                         </p>
                         <div className="space-y-2">
@@ -407,23 +323,23 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
                             return (
                               <div
                                 key={cited._id || `${msg.id}-cite-${idx}`}
-                                className="rounded-lg border border-slate-700/60 bg-slate-900/70 px-3 py-2"
+                                className="rounded-lg border border-gray-200 bg-[#F5F5F5] px-3 py-2"
                               >
                                 <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                                  <span className="text-xs font-semibold text-slate-200">
+                                  <span className="text-xs font-semibold text-white">
                                     {title}
                                   </span>
                                   {citation && (
-                                    <span className="font-mono text-[10px] font-semibold text-sky-400">
+                                    <span className="font-mono text-[10px] font-semibold text-[#1A1A1A]">
                                       {citation}
                                     </span>
                                   )}
                                 </div>
                                 {court && (
-                                  <p className="mt-0.5 text-[10px] text-slate-400">{court}</p>
+                                  <p className="mt-0.5 text-[10px] text-gray-500">{court}</p>
                                 )}
                                 {summary && (
-                                  <p className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-slate-400">
+                                  <p className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-gray-600">
                                     {summary}
                                   </p>
                                 )}
@@ -436,11 +352,11 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
 
                   {/* Actions Bar for Assistant Messages */}
                   {msg.sender === 'assistant' && (
-                    <div className="mt-3 pt-2 border-t border-slate-700/40 flex items-center justify-between text-xs text-slate-400">
-                      <span className="text-[10px] text-slate-500">CaseLens Legal Engine</span>
+                    <div className="mt-3 pt-2 border-t border-gray-200 flex items-center justify-between text-xs text-gray-600">
+                      <span className="text-[10px] text-gray-500">CaseLens Legal Engine</span>
                       <button
                         onClick={() => handleCopy(msg.text, msg.id)}
-                        className="hover:text-sky-400 transition flex items-center gap-1 text-[11px]"
+                        className="text-[#1A1A1A] transition flex items-center gap-1 text-[11px]"
                       >
                         {copiedId === msg.id ? '✓ Copied' : '📋 Copy analysis'}
                       </button>
@@ -449,7 +365,7 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
 
                   {/* Timestamp for User */}
                   {msg.sender === 'user' && (
-                    <div className="text-[10px] text-sky-200/80 text-right mt-1.5">
+                    <div className="text-[10px] text-white text-right mt-1.5">
                       {msg.timestamp}
                     </div>
                   )}
@@ -457,7 +373,7 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
 
                 {/* User Avatar */}
                 {msg.sender === 'user' && (
-                  <div className="w-8 h-8 rounded-xl bg-slate-700 border border-slate-600 flex items-center justify-center text-white text-xs font-semibold flex-shrink-0 mt-1">
+                  <div className="w-8 h-8 rounded-xl border border-gray-300 bg-white flex items-center justify-center text-[#1A1A1A] text-xs font-semibold flex-shrink-0 mt-1">
                     You
                   </div>
                 )}
@@ -467,12 +383,12 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
             {/* Typing Indicator */}
             {isTyping && (
               <div className="flex gap-3.5 justify-start items-center">
-                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-sky-600 to-indigo-600 flex items-center justify-center text-white text-sm flex-shrink-0 shadow-md shadow-sky-500/20">
+                <div className="w-8 h-8 rounded-xl bg-[#000000] flex items-center justify-center text-white text-sm flex-shrink-0 shadow-sm">
                   ⚖️
                 </div>
-                <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl rounded-bl-none px-4 py-3 text-sm flex items-center gap-2">
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-600 border-t-sky-400" />
-                  <span className="text-xs text-slate-400 font-medium">
+                <div className="bg-white border border-gray-200 rounded-2xl rounded-bl-none px-4 py-3 text-sm flex items-center gap-2">
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-900" />
+                  <span className="text-xs text-gray-600 font-medium">
                     Analyzing legal corpus...
                   </span>
                 </div>
@@ -484,9 +400,9 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
         </div>
 
         {/* ─── Bottom Floating Input Box (ChatGPT-style) ──────────────────────── */}
-        <div className="border-t border-slate-800/80 bg-slate-950/80 backdrop-blur p-3 md:p-4">
+        <div className="border-t border-gray-200 bg-white p-3 md:p-4">
           <div className="max-w-3xl mx-auto">
-            <div className="relative flex items-center bg-slate-900 border border-slate-700/80 focus-within:border-sky-500 rounded-2xl shadow-xl transition-all">
+            <div className="relative flex items-center bg-white border border-gray-300 focus-within:border-[#000000] rounded-2xl shadow-sm transition-all">
               <textarea
                 ref={inputRef}
                 value={inputPrompt}
@@ -494,7 +410,7 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
                 onKeyDown={handleKeyDown}
                 rows="1"
                 placeholder="Ask legal questions, cite case facts, or request statutory research..."
-                className="w-full bg-transparent text-slate-100 placeholder-slate-400 px-4 py-3.5 pr-14 text-sm outline-none resize-none min-h-[48px] max-h-36"
+                className="w-full bg-transparent text-[#1A1A1A] placeholder-gray-400 px-4 py-3.5 pr-14 text-sm outline-none resize-none min-h-[48px] max-h-36"
                 style={{ scrollbarWidth: 'none' }}
               />
 
@@ -504,8 +420,8 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
                 disabled={!inputPrompt.trim() || isTyping}
                 className={`absolute right-2.5 p-2 rounded-xl flex items-center justify-center transition-all ${
                   inputPrompt.trim() && !isTyping
-                    ? 'bg-sky-600 text-white hover:bg-sky-500 shadow-md shadow-sky-600/30'
-                    : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                    ? 'bg-[#000000] text-white shadow-sm'
+                    : 'bg-gray-200 text-gray-500 cursor-not-allowed'
                 }`}
                 title="Send Message (Enter)"
               >
@@ -516,7 +432,7 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
             </div>
 
             {/* Disclaimer Subtitle */}
-            <p className="text-[11px] text-center text-slate-500 mt-2">
+            <p className="text-[11px] text-center text-gray-400 mt-2">
               Case Lens AI Assistant is designed for legal research support. Please verify citations against official law reporters (PLD, SCMR, CLC).
             </p>
           </div>

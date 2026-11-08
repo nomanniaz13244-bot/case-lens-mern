@@ -50,29 +50,29 @@ function Login() {
   };
 
   return (
-    <div className="flex-1 min-h-[calc(100vh-3.5rem)] flex items-center justify-center p-4 sm:p-6 bg-radial from-slate-900 via-slate-950 to-black text-slate-100">
+    <div className="flex-1 min-h-[calc(100vh-3.5rem)] flex items-center justify-center p-4 sm:p-6 bg-[#F5F5F5] text-gray-900">
       <div className="w-full max-w-md">
         {/* Header / Brand Card */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-sky-600 to-indigo-600 shadow-xl shadow-sky-600/30 mb-4 ring-1 ring-white/10">
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl  bg-black shadow-sm  mb-4 ring-1 ring-white/10">
             <span className="text-2xl">⚖️</span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900 tracking-tight">
             Sign In to Case Lens AI
           </h1>
-          <p className="mt-2 text-sm text-slate-400">
+          <p className="mt-2 text-sm text-gray-600">
             Access your legal intelligence suite, search cases, and chat with AI
           </p>
         </div>
 
         {/* Card Container */}
-        <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-800/80 rounded-2xl p-6 sm:p-8 shadow-2xl shadow-black/60 relative overflow-hidden">
+        <div className="bg-white backdrop-blur-xl border border-gray-300 rounded-2xl p-6 sm:p-8 shadow-sm shadow-black/60 relative overflow-hidden">
           {/* Subtle top ambient glow */}
-          <div className="absolute -top-24 -left-20 w-48 h-48 bg-sky-500/10 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute -bottom-24 -right-20 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute -top-24 -left-20 w-48 h-48 bg-white rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-24 -right-20 w-48 h-48 bg-white rounded-full blur-3xl pointer-events-none" />
 
           {error && (
-            <div className="mb-5 p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm flex items-start gap-2.5 animate-fadeIn">
+            <div className="mb-5 p-3.5 rounded-xl  border   text-sm flex items-start gap-2.5 animate-fadeIn">
               <span className="text-base leading-none">⚠️</span>
               <span className="flex-1 leading-snug">{error}</span>
             </div>
@@ -82,7 +82,7 @@ function Login() {
             <div>
               <label
                 htmlFor="email"
-                className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5"
+                className="block text-xs font-semibold uppercase tracking-wider text-gray-700 mb-1.5"
               >
                 Email Address
               </label>
@@ -96,7 +96,7 @@ function Login() {
                   value={formData.email}
                   onChange={handleChange}
                   placeholder="name@lawfirm.com"
-                  className="w-full px-4 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all"
+                  className="w-full px-4 py-2.5 bg-white border border-gray-300/80 rounded-xl text-gray-900 placeholder-gray-400 text-sm focus:outline-none focus:ring-0 focus:border-black focus:border-transparent transition-all"
                 />
               </div>
             </div>
@@ -105,7 +105,7 @@ function Login() {
               <div className="flex items-center justify-between mb-1.5">
                 <label
                   htmlFor="password"
-                  className="block text-xs font-semibold uppercase tracking-wider text-slate-300"
+                  className="block text-xs font-semibold uppercase tracking-wider text-gray-700"
                 >
                   Password
                 </label>
@@ -120,12 +120,12 @@ function Login() {
                   value={formData.password}
                   onChange={handleChange}
                   placeholder="••••••••"
-                  className="w-full px-4 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all pr-10"
+                  className="w-full px-4 py-2.5 bg-white border border-gray-300/80 rounded-xl text-gray-900 placeholder-gray-400 text-sm focus:outline-none focus:ring-0 focus:border-black focus:border-transparent transition-all pr-10"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-xs focus:outline-none"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-900 text-xs focus:outline-none"
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
                   {showPassword ? 'Hide' : 'Show'}
@@ -136,7 +136,7 @@ function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 px-4 bg-gradient-to-r from-sky-600 to-sky-500 hover:from-sky-500 hover:to-sky-400 text-white font-semibold rounded-xl shadow-lg shadow-sky-600/30 hover:shadow-sky-500/40 focus:outline-none focus:ring-2 focus:ring-sky-400 disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center gap-2"
+              className="w-full py-3 px-4  bg-black hover:bg-gray-800 text-white font-semibold rounded-xl shadow-sm focus:outline-none focus:ring-0 focus:border-black disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center gap-2"
             >
               {loading ? (
                 <>
@@ -168,12 +168,12 @@ function Login() {
           </form>
 
           {/* Divider */}
-          <div className="mt-6 pt-6 border-t border-slate-800 text-center">
-            <p className="text-sm text-slate-400">
+          <div className="mt-6 pt-6 border-t border-gray-300 text-center">
+            <p className="text-sm text-gray-600">
               Don't have an account?{' '}
               <Link
                 to="/register"
-                className="text-sky-400 hover:text-sky-300 font-semibold transition-colors underline-offset-4 hover:underline"
+                className="bg-white bg-white font-semibold transition-colors underline-offset-4 hover:underline"
               >
                 Create Account
               </Link>

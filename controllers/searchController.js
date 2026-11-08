@@ -1,9 +1,46 @@
 const LegalCase = require('../models/LegalCase');
+const {
+  DEMO_BYPASS,
+  listDemoCases,
+  getDemoCaseById,
+} = require('../config/demoBypass');
 
 // ─── @desc    Search legal cases by query string
 // ─── @route   GET /api/search?q=<query>
 // ─── @access  Public
 const searchCases = async (req, res) => {
+  // ⚠️ DEMO BYPASS: filter the in-memory demo cases — no MongoDB.
+  if (DEMO_BYPASS) {
+    const { q, page = 1, limit = 10 } = req.query;
+    if (!q || q.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        message: 'Search query is required. Use ?q=your+search+term',
+      });
+    }
+    const term = q.trim().toLowerCase();
+    const all = listDemoCases();
+    const filtered = all.filter((c) =>
+      [c.caseTitle, c.citation, c.courtName, c.summary, Array.isArray(c.keywords) ? c.keywords.join(' ') : '']
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(term)
+    );
+    const skip = (Number(page) - 1) * Number(limit);
+    const paged = filtered.slice(skip, skip + Number(limit));
+    return res.status(200).json({
+      success: true,
+      searchMode: 'demo-bypass',
+      query: q.trim(),
+      total: filtered.length,
+      page: Number(page),
+      pages: Math.ceil(filtered.length / Number(limit)),
+      count: paged.length,
+      data: paged,
+    });
+  }
+
   try {
     const { q, page = 1, limit = 10 } = req.query;
 
@@ -92,6 +129,14 @@ const searchCases = async (req, res) => {
 // ─── @route   GET /api/search/:id
 // ─── @access  Public
 const getCaseById = async (req, res) => {
+  // ⚠️ DEMO BYPASS: serve from the in-memory store.
+  if (DEMO_BYPASS) {
+    const demoCase = getDemoCaseById(req.params.id);
+    if (!demoCase) {
+      return res.status(404).json({ success: false, message: 'Case not found (Demo Bypass).' });
+    }
+    return res.status(200).json({ success: true, data: demoCase });
+  }
   try {
     const legalCase = await LegalCase.findById(req.params.id).select('-__v');
 

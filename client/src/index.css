@@ -1,6 +1,11 @@
 @import "tailwindcss";
 
 @theme {
+  --color-app-bg: #F5F5F5;
+  --color-app-text: #1A1A1A;
+  --color-shell-bg: #FFFFFF;
+  --color-map-bg: #0B1120;
+  --color-border: #E5E5E5;
   --color-navy-50: #eef3fb;
   --color-navy-100: #d8e3f4;
   --color-navy-200: #b3c7e8;
@@ -25,5 +30,20 @@ body,
 
 body {
   margin: 0;
-  background-color: var(--color-slate-50);
+  background-color: #F5F5F5;
+  color: #1A1A1A;
+}
+
+input,
+textarea,
+select {
+  color: #1A1A1A;
+  background-color: #ffffff;
+}
+
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
 }

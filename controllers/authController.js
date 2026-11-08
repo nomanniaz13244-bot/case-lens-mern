@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { DEMO_BYPASS, buildDemoUser } = require('../config/demoBypass');
 
 // Helper to generate JWT Token
 const generateToken = (id) => {
@@ -12,6 +13,17 @@ const generateToken = (id) => {
 // @route   POST /api/auth/register
 // @access  Public
 const register = async (req, res) => {
+  // ⚠️ DEMO BYPASS: serve a demo user without touching the database.
+  if (DEMO_BYPASS) {
+    const { email } = req.body;
+    return res.status(200).json({
+      success: true,
+      message: 'Registration successful (Demo Bypass — database unreachable)',
+      token: 'demo_token_12345',
+      user: buildDemoUser(email),
+    });
+  }
+
   try {
     const { fullName, email, password, role } = req.body;
 
@@ -76,6 +88,16 @@ const register = async (req, res) => {
 // @route   POST /api/auth/login
 // @access  Public
 const login = async (req, res) => {
+  // ⚠️ DEMO BYPASS: skip the MongoDB user lookup entirely.
+  if (DEMO_BYPASS) {
+    return res.status(200).json({
+      success: true,
+      message: 'Login successful (Demo Bypass — database unreachable)',
+      token: 'demo_token_12345',
+      user: buildDemoUser(req.body?.email),
+    });
+  }
+
   try {
     const { email, password } = req.body;
 
@@ -132,6 +154,16 @@ const login = async (req, res) => {
 // @route   GET /api/auth/me
 // @access  Private
 const getMe = async (req, res) => {
+  // ⚠️ DEMO BYPASS: return the demo identity without a DB lookup.
+  if (DEMO_BYPASS) {
+    const email = req.user?.email;
+    return res.status(200).json({
+      success: true,
+      message: 'Demo user (Demo Bypass)',
+      user: buildDemoUser(email),
+    });
+  }
+
   try {
     const user = await User.findById(req.user._id).select('-password');
     if (!user) {

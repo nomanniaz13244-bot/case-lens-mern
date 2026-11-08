@@ -3,61 +3,73 @@ import axios from 'axios';
 
 const AuthContext = createContext(null);
 
+const TOKEN_KEY = 'case_lens_token';
+const USER_KEY = 'case_lens_user';
+
+const FALLBACK_TOKEN_KEY = 'token';
+
+const readStoredToken = () =>
+  localStorage.getItem(TOKEN_KEY) || localStorage.getItem(FALLBACK_TOKEN_KEY);
+
+const readStoredUser = () => {
+  try {
+    const stored = localStorage.getItem(USER_KEY);
+    return stored ? JSON.parse(stored) : null;
+  } catch {
+    return null;
+  }
+};
+
+const applyAuthHeader = (authToken) => {
+  if (authToken) {
+    axios.defaults.headers.common.Authorization = `Bearer ${authToken}`;
+  } else {
+    delete axios.defaults.headers.common.Authorization;
+  }
+};
+
+// Global interceptor: always attach the latest stored token to every request.
+axios.interceptors.request.use((config) => {
+  const storedToken = readStoredToken();
+  if (storedToken) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${storedToken}`;
+  }
+  return config;
+});
+
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(() => {
-    try {
-      const stored = localStorage.getItem('case_lens_user');
-      return stored ? JSON.parse(stored) : null;
-    } catch {
-      return null;
-    }
-  });
-
+  const [user, setUser] = useState(() => readStoredUser());
   const [token, setToken] = useState(() => {
-    return localStorage.getItem('case_lens_token') || null;
+    const storedToken = readStoredToken();
+    applyAuthHeader(storedToken);
+    return storedToken || null;
   });
 
-  const [loading, setLoading] = useState(true);
+  // ✅ FIX: Initialise loading=false immediately when a token already exists in
+  // localStorage. This prevents ProtectedRoute from blocking navigation with a
+  // "Loading session…" flash on every hard refresh or module navigation.
+  const [loading, setLoading] = useState(!readStoredToken());
 
-  // Set default authorization header whenever token changes
   useEffect(() => {
-    if (token) {
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-    } else {
-      delete axios.defaults.headers.common['Authorization'];
+    const storedToken = readStoredToken();
+    const storedUser = readStoredUser();
+
+    if (storedToken) {
+      setToken(storedToken);
+      applyAuthHeader(storedToken);
     }
-  }, [token]);
+    if (storedUser) {
+      setUser(storedUser);
+    }
 
-  // Verify and refresh user info on initial load
-  useEffect(() => {
-    const fetchCurrentUser = async () => {
-      const storedToken = localStorage.getItem('case_lens_token');
-      if (!storedToken) {
-        setLoading(false);
-        return;
-      }
-
-      try {
-        const res = await axios.get('/api/auth/me', {
-          headers: { Authorization: `Bearer ${storedToken}` },
-        });
-        if (res.data?.success && res.data?.user) {
-          setUser(res.data.user);
-          localStorage.setItem('case_lens_user', JSON.stringify(res.data.user));
-        }
-      } catch (err) {
-        console.warn('Session expired or invalid token:', err.response?.data?.message || err.message);
-        // If unauthorized, clear storage
-        if (err.response?.status === 401) {
-          logout();
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchCurrentUser();
+    // Always mark loading complete after the effect runs (covers the no-token case).
+    setLoading(false);
   }, []);
+
+  useEffect(() => {
+    applyAuthHeader(token);
+  }, [token]);
 
   const login = async (email, password) => {
     try {
@@ -66,9 +78,10 @@ export const AuthProvider = ({ children }) => {
         const { token: receivedToken, user: receivedUser } = res.data;
         setToken(receivedToken);
         setUser(receivedUser);
-        localStorage.setItem('case_lens_token', receivedToken);
-        localStorage.setItem('case_lens_user', JSON.stringify(receivedUser));
-        axios.defaults.headers.common['Authorization'] = `Bearer ${receivedToken}`;
+        localStorage.setItem(TOKEN_KEY, receivedToken);
+        localStorage.setItem(FALLBACK_TOKEN_KEY, receivedToken);
+        localStorage.setItem(USER_KEY, JSON.stringify(receivedUser));
+        applyAuthHeader(receivedToken);
         return { success: true, user: receivedUser };
       }
       return { success: false, message: res.data?.message || 'Login failed' };
@@ -80,19 +93,15 @@ export const AuthProvider = ({ children }) => {
 
   const register = async (fullName, email, password, role = 'user') => {
     try {
-      const res = await axios.post('/api/auth/register', {
-        fullName,
-        email,
-        password,
-        role,
-      });
+      const res = await axios.post('/api/auth/register', { fullName, email, password, role });
       if (res.data?.success) {
         const { token: receivedToken, user: receivedUser } = res.data;
         setToken(receivedToken);
         setUser(receivedUser);
-        localStorage.setItem('case_lens_token', receivedToken);
-        localStorage.setItem('case_lens_user', JSON.stringify(receivedUser));
-        axios.defaults.headers.common['Authorization'] = `Bearer ${receivedToken}`;
+        localStorage.setItem(TOKEN_KEY, receivedToken);
+        localStorage.setItem(FALLBACK_TOKEN_KEY, receivedToken);
+        localStorage.setItem(USER_KEY, JSON.stringify(receivedUser));
+        applyAuthHeader(receivedToken);
         return { success: true, user: receivedUser };
       }
       return { success: false, message: res.data?.message || 'Registration failed' };
@@ -105,15 +114,16 @@ export const AuthProvider = ({ children }) => {
   const logout = () => {
     setUser(null);
     setToken(null);
-    localStorage.removeItem('case_lens_token');
-    localStorage.removeItem('case_lens_user');
-    delete axios.defaults.headers.common['Authorization'];
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(FALLBACK_TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+    applyAuthHeader(null);
   };
 
   const updateUser = (updatedUser) => {
     setUser((prev) => {
       const merged = { ...prev, ...updatedUser };
-      localStorage.setItem('case_lens_user', JSON.stringify(merged));
+      localStorage.setItem(USER_KEY, JSON.stringify(merged));
       return merged;
     });
   };
@@ -122,7 +132,7 @@ export const AuthProvider = ({ children }) => {
     user,
     token,
     loading,
-    isAuthenticated: !!token && !!user,
+    isAuthenticated: Boolean(token || readStoredToken()),
     login,
     register,
     logout,

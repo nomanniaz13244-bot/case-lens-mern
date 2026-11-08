@@ -54,10 +54,64 @@ const LegalCaseSchema = new mongoose.Schema(
       default: [],
     },
 
+    keyFacts: {
+      type: [String],
+      default: [],
+    },
+
+    timeline: {
+      type: [String],
+      default: [],
+    },
+
+    citations: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+
     verdict: {
       type: String,
       trim: true,
       default: '',
+    },
+
+    facts: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+
+    caseLaws: { type: String, trim: true, default: '' },
+    precedentComparison: { type: String, trim: true, default: '' },
+    supportingContradicting: { type: String, trim: true, default: '' },
+    opposingArguments: { type: String, trim: true, default: '' },
+    strengthsWeaknesses: { type: String, trim: true, default: '' },
+
+    legalIssues: {
+      type: [String],
+      default: [],
+    },
+
+    lawsApplied: {
+      type: [String],
+      default: [],
+    },
+
+    legalLaws: {
+      type: [String],
+      default: [],
+    },
+
+    pastCases: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: [],
+    },
+
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      index: true,
     },
   },
   {
