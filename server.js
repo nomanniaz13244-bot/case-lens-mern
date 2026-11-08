@@ -8,6 +8,7 @@ const adminCaseRoutes = require('./routes/adminCaseRoutes');
 const authRoutes = require('./routes/authRoutes');
 const aiRoutes = require('./routes/aiRoutes');
 const workspaceRoutes = require('./routes/workspaceRoutes');
+const draftingRoutes = require('./routes/draftingRoutes');
 
 // Load environment variables from .env file
 dotenv.config();
@@ -46,6 +47,8 @@ app.use('/api/admin/cases', adminCaseRoutes);
 // AI Legal Chat Module
 app.use('/api/ai', aiRoutes);
 app.use('/api/workspace', workspaceRoutes);
+// Legal Drafting Module
+app.use('/api/drafting', draftingRoutes);
 // Compatibility mount: admin create-ai also resolves under /api/workspace/create-ai.
 app.use('/api/workspace', adminCaseRoutes);
 

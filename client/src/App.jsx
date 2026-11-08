@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard';
 import CaseDetail from './pages/CaseDetail';
 import CaseWorkspace from './pages/CaseWorkspace';
 import ComingSoon from './pages/ComingSoon';
+import LegalDrafting from './pages/LegalDrafting';
 import MyCases from './pages/MyCases';
 import Facts from './pages/case-tabs/Facts';
 import LegalIssues from './pages/case-tabs/LegalIssues';
@@ -41,7 +42,7 @@ export default function App() {
                 <Route path="/laws" element={protectedPage(<ComingSoon />)} />
                 <Route path="/analysis" element={protectedPage(<ComingSoon />)} />
                 <Route path="/opposition" element={protectedPage(<ComingSoon />)} />
-                <Route path="/drafting" element={protectedPage(<ComingSoon />)} />
+                <Route path="/drafting" element={protectedPage(<LegalDrafting />)} />
                 <Route path="/dictionary" element={protectedPage(<ComingSoon />)} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
