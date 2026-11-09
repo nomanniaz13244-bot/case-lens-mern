@@ -1,15 +1,10 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import axios from 'axios';
+import { MoreVertical, Plus, Trash2, X } from 'lucide-react';
 
-const AI_API_URL = 'http://localhost:5000/api/ai/chat';
-
-// Preset sample conversation topics for the sidebar
-const INITIAL_CONVERSATIONS = [
-  { id: '1', title: 'Pre-Arrest Bail Criteria (CrPC 498)', timestamp: 'Today' },
-  { id: '2', title: 'Article 199 Writ Jurisdiction Scope', timestamp: 'Yesterday' },
-  { id: '3', title: 'Specific Performance & Liquidated Damages', timestamp: '3 days ago' },
-  { id: '4', title: 'Admissibility of Digital Evidence (QSO 1984)', timestamp: 'Last week' },
-];
+const AI_API_URL = '/api/ai/chat';
+const CHAT_HISTORY_URL = '/api/chat/history';
+const CHAT_SESSION_URL = '/api/chat';
 
 // Quick prompts for the empty/welcome state
 const QUICK_PROMPTS = [
@@ -55,16 +50,21 @@ How can I assist your legal matter today?`,
   const [inputPrompt, setInputPrompt] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [toast, setToast] = useState(null);
-  const [activeChatId, setActiveChatId] = useState('1');
-  const [chatHistory, setChatHistory] = useState(INITIAL_CONVERSATIONS);
   const [copiedId, setCopiedId] = useState(null);
+
+  // ─── Chat-history state ────────────────────────────────────────────────────
+  const [sessions, setSessions] = useState([]); // { _id, title, updatedAt }
+  const [activeSessionId, setActiveSessionId] = useState(null); // null = fresh unsaved chat
+  const [loadingSessions, setLoadingSessions] = useState(true);
+  const [openMenuId, setOpenMenuId] = useState(null); // 3-dots menu
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null); // inline delete confirmation
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
-  // Au to bottom whenever messages change
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  // Auto-scroll to bottom whenever messages change
+  const scrollToBottom = (behavior = 'smooth') => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
   };
 
   useEffect(() => {
@@ -106,7 +106,7 @@ How can I assist your legal matter today?`,
     try {
       const res = await axios.post(
         AI_API_URL,
-        { message: trimmed, question: trimmed },
+        { message: trimmed, question: trimmed, sessionId: activeSessionId },
         { headers: { 'Content-Type': 'application/json' }, timeout: 60000 }
       );
 
@@ -124,6 +124,12 @@ How can I assist your legal matter today?`,
         throw new Error('The AI service returned an empty response.');
       }
 
+      // The backend creates/reuses the session for this exchange — track it so
+      // further messages land in the same history entry.
+      if (payload.sessionId) {
+        setActiveSessionId(payload.sessionId);
+      }
+
       const assistantMessage = {
         id: `ai-${Date.now()}`,
         sender: 'assistant',
@@ -136,6 +142,7 @@ How can I assist your legal matter today?`,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
+      fetchHistory();
     } catch (err) {
       const detail =
         err.response?.data?.message ||
@@ -174,15 +181,129 @@ How can I assist your legal matter today?`,
     return () => clearTimeout(timer);
   }, [toast]);
 
-  const handleNewChat = () => {    const newChatId = String(Date.now());
-    const newChatTitle = 'New Legal Inquiry';
-    setChatHistory((prev) => [{ id: newChatId, title: newChatTitle, timestamp: 'Just now' }, ...prev]);
-    setActiveChatId(newChatId);
+  // ─── Chat-history logic ─────────────────────────────────────────────────────
+  const WELCOME_MESSAGES = [
+    {
+      id: 'init-1',
+      sender: 'assistant',
+      text: `Hello Counselor! I am **Case Lens AI**, your intelligent legal research and case analysis assistant.
+
+I can help you:
+- Search judicial precedents and landmark citations.
+- Draft legal arguments and formulate case strategies.
+- Summarize lengthy court judgments and extract statutory provisions.
+
+How can I assist your legal matter today?`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    },
+  ];
+
+  const fetchHistory = useCallback(async () => {
+    try {
+      const response = await axios.get(CHAT_HISTORY_URL, { timeout: 20000 });
+      setSessions(response.data?.data || []);
+    } catch {
+      // Non-fatal: the chat works even if history fails to load.
+      setSessions([]);
+    } finally {
+      setLoadingSessions(false);
+    }
+  }, []);
+
+  // Load the history once on mount.
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
+
+  // Close any open 3-dots menu when clicking elsewhere.
+  useEffect(() => {
+    if (!openMenuId) return undefined;
+    const closeMenu = (event) => {
+      if (event.target.closest?.('[data-session-menu]')) return;
+      setOpenMenuId(null);
+    };
+    document.addEventListener('mousedown', closeMenu);
+    return () => document.removeEventListener('mousedown', closeMenu);
+  }, [openMenuId]);
+
+  // Group sessions for the sidebar: Today / Yesterday / Previous 7 Days / Older.
+  const groupSessionsByDate = useCallback((list) => {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfYesterday = new Date(startOfToday.getTime() - 86400000);
+    const startOfWeek = new Date(startOfToday.getTime() - 7 * 86400000);
+
+    const groups = { Today: [], Yesterday: [], 'Previous 7 Days': [], Older: [] };
+    list.forEach((session) => {
+      const date = new Date(session.updatedAt || session.createdAt);
+      let bucket;
+      if (date >= startOfToday) bucket = 'Today';
+      else if (date >= startOfYesterday) bucket = 'Yesterday';
+      else if (date >= startOfWeek) bucket = 'Previous 7 Days';
+      else bucket = 'Older';
+      groups[bucket].push(session);
+    });
+    return Object.entries(groups).filter(([, items]) => items.length > 0);
+  }, []);
+
+  const handleSelectSession = async (sessionId) => {
+    setOpenMenuId(null);
+    if (isTyping || sessionId === activeSessionId) return;
+
+    try {
+      const response = await axios.get(`${CHAT_SESSION_URL}/${sessionId}`, { timeout: 20000 });
+      const data = response.data?.data;
+      if (!data) throw new Error('Session not found.');
+
+      const loaded = (data.messages || []).map((message, index) => ({
+        id: `${data._id}-m${index}`,
+        sender: message.role,
+        text: message.text,
+        citedCases: Array.isArray(message.citedCases) ? message.citedCases : [],
+        timestamp: message.createdAt
+          ? new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          : '',
+      }));
+
+      // Keep the conversation open even if an old session has no messages.
+      setMessages(loaded.length > 0 ? loaded : WELCOME_MESSAGES);
+      setActiveSessionId(data._id);
+      // A fresh paint lands at the bottom of the scroll area.
+      requestAnimationFrame(() => scrollToBottom('auto'));
+    } catch {
+      setToast('Could not load that chat. Please try again.');
+    }
+  };
+
+  const handleDeleteSession = async (sessionId) => {
+    setConfirmDeleteId(null);
+    setOpenMenuId(null);
+
+    const deletingActive = sessionId === activeSessionId;
+    try {
+      await axios.delete(`${CHAT_SESSION_URL}/${sessionId}`, { timeout: 20000 });
+      setSessions((current) => current.filter((session) => session._id !== sessionId));
+      setToast('Chat deleted.');
+      if (deletingActive) {
+        setActiveSessionId(null);
+        setMessages(WELCOME_MESSAGES);
+      }
+    } catch {
+      setToast('Could not delete that chat. Please try again.');
+    }
+  };
+
+  const resetToastState = () => setToast(null);
+
+  const handleNewChat = () => {
+    resetToastState();
+    setOpenMenuId(null);
+    setActiveSessionId(null);
     setMessages([
       {
         id: `init-${Date.now()}`,
         sender: 'assistant',
-        text: `New legal consultation session started. 
+        text: `New legal consultation session started.
 
 How can Case Lens AI assist you with case precedents, legal research, or drafting today?`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -198,7 +319,139 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
 
   return (
     <div className="flex h-screen bg-[#F5F5F5] text-[#1A1A1A] font-sans overflow-hidden">
-      {/* ─── Main Chat Interface ─────────────────────────────────────────────── */}
+      {/* ─── LEFT: Chat History Sidebar (ChatGPT-style) ──────────────────────── */}
+      <aside className="hidden w-[260px] flex-shrink-0 flex-col border-r border-gray-200 bg-white md:flex md:flex-col">
+        <div className="p-3">
+          <button
+            type="button"
+            onClick={handleNewChat}
+            disabled={isTyping}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-black px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-gray-800 disabled:opacity-50"
+          >
+            <Plus size={16} strokeWidth={2.5} aria-hidden="true" />
+            New Chat
+          </button>
+        </div>
+
+        <nav className="flex-1 overflow-y-auto px-2 pb-4" aria-label="Chat history">
+          {loadingSessions ? (
+            <div className="flex items-center justify-center gap-2 px-3 py-8 text-xs text-gray-500">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-700" />
+              Loading history...
+            </div>
+          ) : sessions.length === 0 ? (
+            <div className="px-3 py-8 text-center">
+              <p className="text-xs font-semibold text-gray-600">No conversations yet</p>
+              <p className="mt-1 text-[10px] leading-relaxed text-gray-400">
+                Ask a question and the chat will be saved here automatically.
+              </p>
+            </div>
+          ) : (
+            groupSessionsByDate(sessions).map(([groupLabel, groupItems]) => (
+              <div key={groupLabel} className="mb-4">
+                <p className="mb-1.5 px-3 text-[9px] font-bold uppercase tracking-[0.18em] text-gray-500">
+                  {groupLabel}
+                </p>
+                <div className="space-y-0.5">
+                  {groupItems.map((session) => {
+                    const isActive = session._id === activeSessionId;
+                    const isMenuOpen = openMenuId === session._id;
+                    const isDeleteActive = confirmDeleteId === session._id;
+                    return (
+                      <div
+                        key={session._id}
+                        className={`relative flex items-stretch gap-0 rounded-lg transition ${
+                          isActive ? 'bg-gray-200' : 'hover:bg-[#F5F5F5]'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => handleSelectSession(session._id)}
+                          className="min-w-0 flex-1 rounded-l-lg px-3 py-2.5 text-left"
+                        >
+                          <p
+                            className={`truncate text-xs font-semibold ${
+                              isActive ? 'text-black' : 'text-[#1A1A1A]'
+                            }`}
+                            title={session.title}
+                          >
+                            {session.title || 'New Chat'}
+                          </p>
+                          <p className="mt-0.5 truncate text-[10px] text-gray-500">
+                            {new Date(session.updatedAt || session.createdAt).toLocaleDateString(
+                              undefined,
+                              { day: '2-digit', month: 'short' }
+                            )}
+                          </p>
+                        </button>
+
+                        {/* 3-dots menu: Delete */}
+                        <div className="relative flex items-center pr-1" data-session-menu>
+                          <button
+                            type="button"
+                            aria-label={`Options for chat "${session.title || 'New Chat'}"`}
+                            title="Chat options"
+                            onClick={() => setOpenMenuId(isMenuOpen ? null : session._id)}
+                            className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-300 hover:text-gray-700"
+                          >
+                            <MoreVertical size={14} strokeWidth={2} aria-hidden="true" />
+                          </button>
+
+                          {isMenuOpen && (
+                            <div className="absolute right-0 top-full z-30 mt-1 w-36 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOpenMenuId(null);
+                                  setConfirmDeleteId(session._id);
+                                }}
+                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] font-semibold text-red-600 transition hover:bg-red-50"
+                              >
+                                <Trash2 size={13} strokeWidth={2} aria-hidden="true" />
+                                Delete
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Inline delete confirmation */}
+                        {isDeleteActive && (
+                          <div className="absolute inset-0 z-20 flex items-center justify-center gap-1.5 rounded-lg bg-white/95 px-2 shadow-sm ring-1 ring-red-200">
+                            <span className="max-w-[80px] truncate text-[10px] font-semibold text-gray-700">
+                              Delete?
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSession(session._id)}
+                              className="rounded-lg bg-red-600 px-2.5 py-1 text-[10px] font-bold text-white transition hover:bg-red-700"
+                            >
+                              Yes
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteId(null)}
+                              className="flex items-center rounded-lg border border-gray-300 p-1 text-gray-600 transition hover:bg-gray-100"
+                              aria-label="Cancel delete"
+                            >
+                              <X size={11} strokeWidth={2.5} aria-hidden="true" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))
+          )}
+        </nav>
+
+        <div className="border-t border-gray-200 px-4 py-3 text-[10px] text-gray-500">
+          Chat history is saved automatically
+        </div>
+      </aside>
+
+      {/* ─── RIGHT: Main Chat Interface ───────────────────────────────────────── */}
       <main className="flex-1 flex flex-col h-full bg-[#F5F5F5] relative">
         {/* Top Navbar */}
         <header className="h-14 border-b border-gray-200 bg-white px-4 flex items-center justify-between z-10">
@@ -221,6 +474,7 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
             </a>
             <button
               onClick={() => {
+                setActiveSessionId(null);
                 setMessages([
                   {
                     id: `cleared-${Date.now()}`,
