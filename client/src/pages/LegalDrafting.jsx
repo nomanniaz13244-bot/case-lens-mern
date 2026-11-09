@@ -25,6 +25,7 @@ const DOCUMENT_TYPES = [
 ];
 
 const MAX_INSTRUCTIONS_LENGTH = 8000;
+const MAX_DRAFT_LENGTH = 30000;
 
 const AI_INSTRUCTIONS = {
   improve:
@@ -369,8 +370,8 @@ export default function LegalDrafting() {
 
     // Let the browser paint the document before opening the print dialog.
     window.setTimeout(() => {
-      printWindow.print();
       printWindow.onafterprint = () => printWindow.close();
+      printWindow.print();
     }, 250);
   };
 
@@ -473,6 +474,7 @@ export default function LegalDrafting() {
                 onChange={(event) => setInstructions(event.target.value)}
                 rows={9}
                 maxLength={MAX_INSTRUCTIONS_LENGTH}
+                disabled={generating || Boolean(editAction)}
                 placeholder={`Describe the facts, parties, court, relief sought and any deadlines.\n\nExample: My client [Client Name] was issued a cheque by [Opposite Party] which was dishonoured...`}
                 className="min-h-[180px] w-full resize-y rounded-xl border border-[#E5E5E5] bg-white p-3.5 text-sm leading-relaxed text-[#1A1A1A] outline-none transition placeholder:text-gray-400 focus:border-black focus:ring-2 focus:ring-black/5"
               />
@@ -701,6 +703,7 @@ export default function LegalDrafting() {
                     if (error) setError('');
                     if (notice) setNotice('');
                   }}
+                  maxLength={MAX_DRAFT_LENGTH}
                   spellCheck
                   placeholder={`The generated legal draft will appear here in editable form.\n\nSelect a document type, describe the case, then click "Generate Draft". You can also paste an existing draft here and use "Improve with AI" or "Simplify with AI".`}
                   className="h-full min-h-[520px] w-full resize-y rounded-xl border border-[#E5E5E5] bg-[#FCFCFC] p-5 font-serif text-[15px] leading-7 text-[#1A1A1A] outline-none transition placeholder:font-sans placeholder:text-sm placeholder:leading-relaxed placeholder:text-gray-400 focus:border-black focus:bg-white focus:ring-2 focus:ring-black/5 lg:min-h-[660px]"

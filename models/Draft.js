@@ -16,7 +16,6 @@ const draftSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: [true, 'A draft must belong to a user'],
-      index: true,
     },
 
     documentType: {
