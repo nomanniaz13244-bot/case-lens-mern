@@ -223,9 +223,15 @@ const chatWithAI = async (req, res) => {
   }
 };
 
+const DEFAULT_CASE_CHAT_WELCOME = [
+  { role: 'ai', text: 'Hello! I have analyzed this case. What would you like to know?' },
+];
+
 const caseSpecificChat = async (req, res) => {
   try {
     const { caseId, question } = req.body;
+    const userId = req.user?._id || req.user?.id;
+
     if (!caseId || !String(question || '').trim()) {
       return res.status(400).json({ success: false, message: 'caseId and question are required.' });
     }
@@ -253,11 +259,82 @@ const caseSpecificChat = async (req, res) => {
       context,
       { userPrompt: String(question).trim(), temperature: 0.2, maxTokens: 1000 }
     );
+
+    // Persist user question and AI answer to ChatSession for this case
+    if (userId) {
+      try {
+        let session = await ChatSession.findOne({ userId, caseId });
+        if (!session) {
+          session = new ChatSession({
+            userId,
+            caseId,
+            title: `Case: ${legalCase.caseTitle || 'Legal Case'}`.slice(0, 100),
+            messages: [],
+          });
+        }
+        session.messages.push(
+          { role: 'user', text: String(question).trim() },
+          { role: 'ai', text: answer }
+        );
+        await session.save();
+      } catch (saveError) {
+        console.error('Case chat history persistence error:', saveError?.message || String(saveError));
+      }
+    }
+
     return res.status(200).json({ success: true, data: { answer } });
   } catch (error) {
     console.error('AI provider error:', error?.message || String(error));
     if (error?.stack) console.error(error.stack);
     return res.status(500).json({ success: false, message: error.message || 'Unable to answer the case question.' });
+  }
+};
+
+const getCaseChatHistory = async (req, res) => {
+  try {
+    const { caseId } = req.params;
+    const userId = req.user?._id || req.user?.id;
+
+    if (!caseId) {
+      return res.status(400).json({ success: false, message: 'caseId parameter is required.' });
+    }
+
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized.' });
+    }
+
+    const session = await ChatSession.findOne({ userId, caseId });
+
+    if (!session || !Array.isArray(session.messages) || session.messages.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          messages: DEFAULT_CASE_CHAT_WELCOME,
+        },
+      });
+    }
+
+    const messages = session.messages.map((msg) => ({
+      role: msg.role === 'assistant' ? 'ai' : msg.role,
+      text: msg.text,
+      createdAt: msg.createdAt,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        messages,
+      },
+    });
+  } catch (error) {
+    console.error('Fetch case chat history error:', error?.message || String(error));
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch case chat history.',
+      data: {
+        messages: DEFAULT_CASE_CHAT_WELCOME,
+      },
+    });
   }
 };
 
@@ -491,4 +568,4 @@ const runStrictJudgmentTool = async (req, res, systemPrompt) => {
 const summarizeJudgment = async (req, res) => runStrictJudgmentTool(req, res, SUMMARIZE_SYSTEM_PROMPT);
 const extractPrinciples = async (req, res) => runStrictJudgmentTool(req, res, PRINCIPLES_SYSTEM_PROMPT);
 
-module.exports = { chatWithAI, caseSpecificChat, simpleCaseChat, explainLaw, summarizeJudgment, extractPrinciples, defineTerm };
+module.exports = { chatWithAI, caseSpecificChat, simpleCaseChat, explainLaw, summarizeJudgment, extractPrinciples, defineTerm, getCaseChatHistory };

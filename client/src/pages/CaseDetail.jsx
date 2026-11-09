@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
+import { Rnd } from 'react-rnd';
+import NeuralMindMap from '../components/NeuralMindMap';
 
 const API_BASE_URL = '/api/workspace';
-// Real backend AI: fetches the case from MongoDB, grounds the prompt, calls Groq.
 const AI_API_URL = '/api/ai/case-chat';
 
 const getAuthToken = () =>
@@ -24,15 +25,11 @@ export default function CaseDetail() {
   const navigate = useNavigate();
   const { caseId } = useParams();
 
-  // Active workspace tab (default keeps the Mind Map visible on arrival).
   const [activeTab, setActiveTab] = useState('AI Understanding');
-  // Pop-up state for the 6 mind-map boxes.
-  const [modalData, setModalData] = useState(null);
-
-  // ── Real case data — fetched from the in-memory MongoDB via the backend ──
   const [caseData, setCaseData] = useState(null);
   const caseTitle = caseData?.caseTitle || 'State vs. Ahmed Khan';
 
+  // ── Fetch Real Case Data ──
   useEffect(() => {
     let alive = true;
     const token = getAuthToken();
@@ -41,54 +38,69 @@ export default function CaseDetail() {
       .get(`${API_BASE_URL}/case/${caseId}`, { headers: authHeaders() })
       .then((response) => {
         if (alive && response.data?.success && response.data?.data) {
-          console.log('Case Data from DB:', response.data.data);
           setCaseData(response.data.data);
         }
       })
-      .catch((err) => console.warn('Case fetch failed — keeping fallback data:', err?.message));
+      .catch((err) => console.warn('Case fetch failed:', err?.message));
     return () => { alive = false; };
   }, [caseId]);
 
-  // ── Chat state: controlled input + message history (real backend AI) ──
+  // ── Chat State ──
   const [chatInput, setChatInput] = useState('');
   const [chatHistory, setChatHistory] = useState([
     { role: 'ai', text: 'Hello! I have analyzed this case. What would you like to know?' },
   ]);
   const [aiTyping, setAiTyping] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const chatScrollRef = useRef(null);
 
-  // Auto-scroll the chat to the latest message whenever history/typing changes.
+  // ── Fetch Chat History ──
   useEffect(() => {
-    const el = chatScrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [chatHistory, aiTyping]);
-
-  // DEBUG: when the active tab renders no data, dump the whole case object so
-  // we can see exactly what MongoDB returned (field names + values).
-  useEffect(() => {
-    if (!caseData) return;
-    const current = tabContent[activeTab];
-    if (!current) return;
-    const isEmpty = current.items ? current.items.length === 0 : !String(current.text || '').trim();
-    if (isEmpty) {
-      console.log(`Current Case Data (tab "${activeTab}" is empty):`, caseData);
+    let alive = true;
+    const token = getAuthToken();
+    if (!token || !caseId) {
+      setIsLoadingHistory(false);
+      return;
     }
-  }, [activeTab, caseData]);
+    setIsLoadingHistory(true);
+    axios
+      .get(`${AI_API_URL}/${caseId}`, { headers: authHeaders() })
+      .then((response) => {
+        if (!alive) return;
+        const messages = response.data?.data?.messages || response.data?.messages;
+        if (Array.isArray(messages) && messages.length > 0) {
+          setChatHistory(messages);
+        } else {
+          setChatHistory([
+            { role: 'ai', text: 'Hello! I have analyzed this case. What would you like to know?' },
+          ]);
+        }
+      })
+      .catch((err) => console.warn('Failed to load case chat history:', err?.message))
+      .finally(() => { if (alive) setIsLoadingHistory(false); });
+    return () => { alive = false; };
+  }, [caseId]);
+
+  // ── Auto Scroll Chat ──
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const el = chatScrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [chatHistory, aiTyping, isChatOpen]);
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
     const text = (chatInput || '').trim();
-    if (!text) return; // ignore empty input
-    if (aiTyping) return; // one request at a time
+    if (!text || aiTyping) return;
 
-    // Append the user's message and clear the input immediately.
     setChatHistory((prev) => [...prev, { role: 'user', text }]);
     setChatInput('');
     setAiTyping(true);
 
     try {
-      // Backend "simple case chat" — backend fetches the case, calls Groq.
-      // No direct browser → Groq request, so no CORS issues.
       const response = await axios.post(
         AI_API_URL,
         { caseId, question: text },
@@ -97,98 +109,65 @@ export default function CaseDetail() {
       const answer = response.data?.data?.answer;
       setChatHistory((prev) => [
         ...prev,
-        { role: 'ai', text: answer || 'The AI returned no answer for this question.' },
+        { role: 'ai', text: answer || 'The AI returned no answer.' },
       ]);
     } catch (err) {
-      console.warn('AI chat error:', err?.response?.data?.message || err?.message);
       setChatHistory((prev) => [...prev, { role: 'ai', text: 'Error connecting to AI.' }]);
     } finally {
       setAiTyping(false);
     }
   };
 
-  // ── Field access — always show exactly what the database returns ──
+  // ── Data Formatting Helpers ──
   const textOf = (value) => {
     if (value == null) return '';
     if (Array.isArray(value)) return value.filter(Boolean).map((item) => String(item).trim()).filter(Boolean).join('\n');
     return String(value).trim();
   };
+
   const listItems = (value) => {
     if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
     const asString = textOf(value);
     if (asString.includes('\n')) return asString.split('\n').map((item) => item.trim()).filter(Boolean);
     return asString ? [asString] : [];
   };
+
   const lawsText = () =>
     textOf(asList(caseData?.lawsApplied).join(', ')) ||
     textOf(asList(caseData?.legalLaws).join(', ')) ||
     textOf(caseData?.caseLaws) ||
     '';
 
-  // ── Center-panel content per tab (raw values straight from the database) ──
+  // ── Tab Content ──
   const tabContent = {
-    'My Cases': {
-      title: 'My Cases',
-      text: caseData
-        ? `${caseData.caseTitle} is open in your workspace. Use the mind map and the assistant panel to analyze it.`
-        : 'Case data is loading from the database…',
-    },
-    'Facts': {
-      title: 'Facts & Timeline',
-      text: textOf(caseData?.facts),
-    },
-    'Legal Issues': {
-      title: 'Legal Issues',
-      items: listItems(caseData?.legalIssues),
-    },
+    'My Cases': { title: 'My Cases', text: caseData ? `${caseData.caseTitle} is open in your workspace.` : 'Loading...' },
+    'Facts': { title: 'Facts & Timeline', text: textOf(caseData?.facts) },
+    'Legal Issues': { title: 'Legal Issues', items: listItems(caseData?.legalIssues) },
     'Laws & Case Law': (() => {
-      // Backend saves lawsApplied directly from the AI analysis.
       const value = caseData?.lawsApplied || caseData?.legalLaws || caseData?.caseLaws;
-      if (Array.isArray(value)) {
-        return { title: 'Laws & Case Law', items: value.map((item) => String(item).trim()).filter(Boolean) };
-      }
+      if (Array.isArray(value)) return { title: 'Laws & Case Law', items: value.map((item) => String(item).trim()).filter(Boolean) };
       return { title: 'Laws & Case Law', text: textOf(value) };
     })(),
-    'Precedent Comparison': {
-      title: 'Precedent Comparison',
-      text: textOf(caseData?.precedentComparison || caseData?.precedenceComparison),
-    },
-    'Supporting/Contradicting': {
-      title: 'Supporting/Contradicting',
-      text: textOf(caseData?.supportingContradicting),
-    },
-    'Opposing Arguments': {
-      title: 'Opposing Arguments',
-      text: textOf(caseData?.opposingArguments),
-    },
+    'Precedent Comparison': { title: 'Precedent Comparison', text: textOf(caseData?.precedentComparison) },
+    'Supporting/Contradicting': { title: 'Supporting/Contradicting', text: textOf(caseData?.supportingContradicting) },
+    'Opposing Arguments': { title: 'Opposing Arguments', text: textOf(caseData?.opposingArguments) },
   };
 
-  // ── Pop-up content for the 6 mind-map nodes (raw database values) ──
+  // ── Mind Map Helpers ──
   const nodeTitles = {
-    facts: 'Facts & Timeline',
-    caseLaws: 'Case Laws',
-    precedent: 'Precedent Comparison',
-    supporting: 'Supporting/Contradicting',
-    opposing: 'Opposing Arguments',
-    strengths: 'Strengths & Weaknesses',
+    facts: 'Facts & Timeline', caseLaws: 'Case Laws', precedent: 'Precedent Comparison',
+    supporting: 'Supporting/Contradicting', opposing: 'Opposing Arguments', strengths: 'Strengths & Weaknesses',
   };
 
   const nodeValue = (key) => {
     switch (key) {
-      case 'facts':
-        return caseData?.facts;
-      case 'caseLaws':
-        return lawsText();
-      case 'precedent':
-        return caseData?.precedentComparison || caseData?.precedenceComparison;
-      case 'supporting':
-        return caseData?.supportingContradicting;
-      case 'opposing':
-        return caseData?.opposingArguments;
-      case 'strengths':
-        return caseData?.strengthsWeaknesses;
-      default:
-        return null;
+      case 'facts': return caseData?.facts;
+      case 'caseLaws': return lawsText();
+      case 'precedent': return caseData?.precedentComparison;
+      case 'supporting': return caseData?.supportingContradicting;
+      case 'opposing': return caseData?.opposingArguments;
+      case 'strengths': return caseData?.strengthsWeaknesses;
+      default: return null;
     }
   };
 
@@ -196,52 +175,23 @@ export default function CaseDetail() {
     const title = nodeTitles[node.key];
     let content = textOf(nodeValue(node.key));
     if (node.key === 'summary') {
-      content = caseData
-        ? `${caseData.caseTitle} — ${textOf(caseData.summary)}`
-        : 'Case data is loading from the database…';
+      content = caseData ? `${caseData.caseTitle} — ${textOf(caseData.summary)}` : 'Loading...';
     }
     return { key: node.key, title, content };
   };
 
-  // The 6 surrounding nodes: label, data key, position styling.
-  const nodes = [
-    { key: 'facts', label: 'Facts & Timeline', pos: 'top-[15%] left-[15%]' },
-    { key: 'caseLaws', label: 'Case Laws', pos: 'top-[15%] right-[15%]' },
-    { key: 'precedent', label: 'Precedent Comparison', pos: 'top-[45%] left-[5%]' },
-    { key: 'supporting', label: 'Supporting/Contradicting', pos: 'top-[45%] right-[5%]' },
-    { key: 'opposing', label: 'Opposing Arguments', pos: 'bottom-[15%] left-[15%]' },
-    { key: 'strengths', label: 'Strengths & Weaknesses', pos: 'bottom-[15%] right-[15%]' },
-  ];
-
-  const activeKey = modalData?.key || null;
-
-  const activeBoxCls = (key) =>
-    activeKey === key
-      ? 'border-blue-500 shadow-[0_0_18px_rgba(59,130,246,0.55)] scale-105'
-      : 'border-gray-400 shadow-lg hover:border-black hover:shadow-xl';
-
   const active = tabContent[activeTab] || tabContent['Facts'];
 
   return (
-    <div className="min-h-screen bg-[#F5F5F5] p-4 flex flex-col">
-      {/* Modal entrance animation (pure CSS) */}
-      <style>{`
-        @keyframes modalFade { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes modalPop { from { opacity: 0; transform: scale(0.92) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
-        .modal-overlay { animation: modalFade 0.2s ease-out; }
-        .modal-box { animation: modalPop 0.22s ease-out; }
-        @keyframes panelFade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-        .panel-swap { animation: panelFade 0.25s ease-out; }
-      `}</style>
-
-      {/* ── Header & Tabs (never unmount) ──────────────────────────────────── */}
+    <div className="min-h-screen bg-[#F5F5F5] p-4 flex flex-col relative">
+      {/* Header & Tabs */}
       <div className="bg-white border border-gray-300 rounded-lg p-4 mb-4 shadow-sm">
         <div className="flex justify-between items-center mb-4">
           <div>
             <p className="text-xs text-gray-500 font-bold tracking-widest uppercase">Active Case Context</p>
             <h1 className="text-2xl font-bold text-gray-900">{caseTitle}</h1>
           </div>
-          <button onClick={() => navigate('/my-cases')} className="bg-white border border-black text-black px-4 py-1 rounded shadow-sm hover:bg-gray-100">
+          <button onClick={() => navigate('/my-cases')} className="bg-white border border-black text-black px-4 py-1 rounded shadow-sm hover:bg-gray-100 cursor-pointer">
             Switch
           </button>
         </div>
@@ -251,9 +201,7 @@ export default function CaseDetail() {
               key={i}
               onClick={() => setActiveTab(tab)}
               className={`px-4 py-1.5 text-sm rounded-lg border whitespace-nowrap cursor-pointer transition ${
-                activeTab === tab
-                  ? 'bg-black text-white border-black'
-                  : 'bg-white text-gray-600 border-gray-300 hover:border-black'
+                activeTab === tab ? 'bg-black text-white border-black' : 'bg-white text-gray-600 border-gray-300 hover:border-black'
               }`}
             >
               {i + 1}. {tab}
@@ -262,56 +210,22 @@ export default function CaseDetail() {
         </div>
       </div>
 
-      {/* ── Main Workspace: 2-column — center content + fixed AI chat ───────── */}
-      <div className="flex flex-1 gap-4 overflow-hidden">
-        
-        {/* CENTER: swaps per tab; header/tabs/chat stay mounted */}
+      {/* Main Content Area */}
+      <div className="flex flex-1 overflow-hidden">
         <div className="flex-1 overflow-hidden">
           {activeTab === 'AI Understanding' ? (
-            /* Exact Dark Blue Mind Map */
-            <main className="panel-swap h-full bg-[#0B1120] rounded-lg shadow-lg relative overflow-hidden flex items-center justify-center p-8">
-              
-              {/* SVG Connecting Lines — active node's line thickens */}
-              <svg className="absolute inset-0 w-full h-full pointer-events-none">
-                <line x1="50%" y1="50%" x2="25%" y2="20%" stroke="#3B82F6" strokeWidth={activeKey === 'facts' ? 3 : 2} strokeDasharray="5,5" />
-                <line x1="50%" y1="50%" x2="75%" y2="20%" stroke="#3B82F6" strokeWidth={activeKey === 'caseLaws' ? 3 : 2} strokeDasharray="5,5" />
-                <line x1="50%" y1="50%" x2="20%" y2="50%" stroke="#3B82F6" strokeWidth={activeKey === 'precedent' ? 3 : 2} strokeDasharray="5,5" />
-                <line x1="50%" y1="50%" x2="80%" y2="50%" stroke="#3B82F6" strokeWidth={activeKey === 'supporting' ? 3 : 2} strokeDasharray="5,5" />
-                <line x1="50%" y1="50%" x2="25%" y2="80%" stroke="#3B82F6" strokeWidth={activeKey === 'opposing' ? 3 : 2} strokeDasharray="5,5" />
-                <line x1="50%" y1="50%" x2="75%" y2="80%" stroke="#3B82F6" strokeWidth={activeKey === 'strengths' ? 3 : 2} strokeDasharray="5,5" />
-              </svg>
-
-              {/* Center Case Title Node */}
-              <div className="relative z-10 bg-black border-2 border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.6)] text-white px-6 py-4 rounded-full text-center">
-                <p className="text-xs text-gray-400 font-bold uppercase">Case Title</p>
-                <h2 className="font-bold text-sm max-w-[220px]">{caseTitle}</h2>
-              </div>
-
-              {/* Surrounding Nodes — clickable, opens the pop-up modal */}
-              {nodes.map((node) => (
-                <button
-                  key={node.key}
-                  type="button"
-                  onClick={() => setModalData(modalContentFor(node))}
-                  className={`absolute ${node.pos} z-10 w-40 bg-white rounded-lg p-3 text-center border transition duration-200 ${activeBoxCls(node.key)}`}
-                >
-                  <h3 className="font-bold text-sm text-black">{node.label}</h3>
-                  <p className="text-[10px] text-gray-500 mt-1">OPEN ANALYSIS</p>
-                </button>
-              ))}
+            <main className="h-full w-full relative">
+              <NeuralMindMap caseTitle={caseTitle} caseData={caseData} getNodeContent={(key) => modalContentFor({ key })} />
             </main>
           ) : (
-            /* Clean white page for every other tab */
-            <main className="panel-swap h-full overflow-y-auto rounded-lg border border-gray-300 bg-white p-8 shadow-sm">
+            <main className="h-full overflow-y-auto rounded-lg border border-gray-300 bg-white p-8 shadow-sm">
               <p className="mb-1 text-xs font-bold uppercase tracking-widest text-gray-500">Case Workspace</p>
               <h2 className="mb-6 text-2xl font-bold text-gray-900">{active.title}</h2>
               <div className="rounded-lg border border-gray-300 bg-gray-50 p-6">
                 {active.items ? (
                   active.items.length ? (
                     <ul className="list-disc space-y-2 pl-5 text-sm leading-7 text-gray-700">
-                      {active.items.map((item, index) => (
-                        <li key={index}>{item}</li>
-                      ))}
+                      {active.items.map((item, index) => <li key={index}>{item}</li>)}
                     </ul>
                   ) : null
                 ) : (
@@ -321,87 +235,110 @@ export default function CaseDetail() {
             </main>
           )}
         </div>
-
-        {/* RIGHT: AI Assistant (always visible) */}
-        <div className="w-[350px] shrink-0 bg-white border border-gray-300 rounded-lg shadow-md flex flex-col">
-          <div className="bg-black text-white p-4 rounded-t-lg">
-            <h2 className="font-bold">AI Assistant</h2>
-            <p className="text-xs text-gray-300">Ask about this specific case</p>
-          </div>
-          
-          <div ref={chatScrollRef} className="flex-1 space-y-3 overflow-y-auto bg-gray-50 p-4">
-            {chatHistory.map((msg, idx) => {
-              const isUser = msg.role === 'user';
-              return (
-                <div key={idx} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-                  <div
-                    className={`max-w-[85%] rounded-lg p-3 text-sm ${
-                      isUser
-                        ? 'bg-black text-white'
-                        : 'bg-white text-black border border-gray-200'
-                    }`}
-                  >
-                    {msg.text}
-                  </div>
-                </div>
-              );
-            })}
-            {aiTyping && (
-              <div className="flex justify-start">
-                <div className="rounded-lg bg-white px-3 py-2 text-sm text-gray-500 border border-gray-200">
-                  AI is thinking...
-                </div>
-              </div>
-            )}
-          </div>
-
-          <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-300 flex gap-2">
-            <input 
-              type="text" 
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              placeholder="Ask a question..." 
-              className="flex-1 border border-gray-300 p-2 rounded focus:outline-none focus:border-black"
-            />
-            <button type="submit" className="bg-black text-white px-4 py-2 rounded hover:bg-gray-800">
-              Send
-            </button>
-          </form>
-        </div>
-
       </div>
 
-      {/* ── Pop-up Modal — shown only when modalData is set ─────────────────── */}
-      {modalData && (
-        <div className="modal-overlay fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setModalData(null)}>
-          <div
-            className="modal-box bg-white rounded-lg p-6 max-w-md w-full shadow-2xl border border-gray-200"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
+      {/* Floating Lawyer Bot Button */}
+      <div
+        className="fixed bottom-6 right-6 z-50 flex flex-col items-center cursor-pointer transition-transform hover:scale-105 active:scale-95"
+        onClick={() => setIsChatOpen((prev) => !prev)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsChatOpen((prev) => !prev); }}
+        aria-label="Toggle Case AI Assistant"
+      >
+        <img src="/lawyer.png" alt="AI Chat" className="w-16 h-16 rounded-full object-cover shadow-lg border-2 border-white" />
+        <span className="text-xs font-semibold text-gray-700 bg-white px-3 py-1 rounded-full mt-1 shadow-md border border-gray-200 select-none">
+          Lawyer Bot
+        </span>
+      </div>
+
+      {/* Draggable Chat Widget */}
+      {isChatOpen && (
+        <div className="fixed bottom-28 right-6 z-50 pointer-events-none w-[380px] h-[500px]">
+          <Rnd
+            default={{ x: 0, y: 0, width: 380, height: 500 }}
+            minWidth={300}
+            minHeight={360}
+            dragHandleClassName="chat-drag-handle"
+            enableResizing={{ top: false, right: false, bottom: false, left: false, topRight: false, bottomRight: true, bottomLeft: false, topLeft: false }}
+            className="pointer-events-auto shadow-2xl rounded-xl overflow-hidden border border-gray-300 bg-white"
           >
-            <div className="flex items-start justify-between gap-4">
-              <h2 className="text-lg font-bold text-gray-900">{modalData.title}</h2>
-              <button
-                type="button"
-                onClick={() => setModalData(null)}
-                aria-label="Close"
-                className="shrink-0 grid h-8 w-8 place-items-center rounded-lg border border-black text-sm font-bold text-black transition hover:bg-black hover:text-white"
-              >
-                ✕
-              </button>
+            <div className="w-full h-full flex flex-col overflow-hidden bg-white">
+              {/* Header */}
+              <div className="shrink-0 chat-drag-handle cursor-move bg-black text-white px-4 py-3 flex items-center justify-between select-none">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+                  <div>
+                    <h2 className="font-bold text-sm leading-tight text-white">Case AI Assistant</h2>
+                    <p className="text-[11px] text-gray-300">Drag to move • Resize from ↘</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsChatOpen(false)}
+                  className="w-7 h-7 flex items-center justify-center rounded text-gray-300 hover:text-white hover:bg-gray-800 transition cursor-pointer"
+                  aria-label="Close Chat"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Chat History */}
+              <div ref={chatScrollRef} className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 bg-gray-50">
+                {isLoadingHistory ? (
+                  <div className="flex flex-col items-center justify-center h-full text-gray-500 py-10 space-y-2">
+                    <div className="w-5 h-5 border-2 border-black border-t-transparent rounded-full animate-spin"></div>
+                    <p className="text-xs font-medium">Loading chat history...</p>
+                  </div>
+                ) : (
+                  <>
+                    {chatHistory.map((msg, idx) => (
+                      <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-[85%] rounded-lg p-3 text-sm leading-relaxed ${
+                          msg.role === 'user' ? 'bg-black text-white' : 'bg-white text-black border border-gray-200 shadow-sm'
+                        }`}>
+                          {msg.text}
+                        </div>
+                      </div>
+                    ))}
+                    {aiTyping && (
+                      <div className="flex justify-start">
+                        <div className="rounded-lg bg-white px-3 py-2 text-sm text-gray-500 border border-gray-200 shadow-sm flex items-center gap-2">
+                          <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce"></span>
+                          <span>AI is thinking...</span>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* Input Form */}
+              <form onSubmit={handleSendMessage} className="shrink-0 p-3 bg-white border-t border-gray-200 flex gap-2">
+                <input
+                  type="text"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="Ask a question..."
+                  className="flex-1 border border-gray-300 px-3 py-2 text-sm rounded focus:outline-none focus:border-black"
+                />
+                <button
+                  type="submit"
+                  disabled={aiTyping || !chatInput.trim()}
+                  className="bg-black text-white px-4 py-2 text-sm rounded hover:bg-gray-800 disabled:opacity-50 transition cursor-pointer"
+                >
+                  Send
+                </button>
+              </form>
+
+              {/* Resize Indicator */}
+              <div className="absolute bottom-1 right-1 pointer-events-none text-gray-400 select-none">
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+                  <path d="M9 1L1 9M9 5L5 9M9 9L9 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              </div>
             </div>
-            <p className="mt-4 text-sm leading-6 text-gray-700 whitespace-pre-wrap">{modalData.content}</p>
-            <div className="mt-6 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setModalData(null)}
-                className="bg-black text-white px-4 py-2 rounded text-sm font-semibold transition hover:bg-gray-800"
-              >
-                Close
-              </button>
-            </div>
-          </div>
+          </Rnd>
         </div>
       )}
     </div>

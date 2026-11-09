@@ -8,7 +8,7 @@ const chatMessageSchema = new mongoose.Schema(
       type: String,
       required: [true, 'A message role is required'],
       enum: {
-        values: ['user', 'assistant'],
+        values: ['user', 'assistant', 'ai'],
         message: '{VALUE} is not a supported message role',
       },
     },
@@ -42,6 +42,13 @@ const chatSessionSchema = new mongoose.Schema(
       index: true,
     },
 
+    caseId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'LegalCase',
+      default: null,
+      index: true,
+    },
+
     // Auto-generated from the first user message (truncated), or 'New Chat'
     // until the first exchange happens.
     title: {
@@ -70,6 +77,7 @@ const chatSessionSchema = new mongoose.Schema(
 // History sidebar ordering: a user's sessions, pinned first then most
 // recently active.
 chatSessionSchema.index({ userId: 1, isPinned: -1, updatedAt: -1 });
+chatSessionSchema.index({ userId: 1, caseId: 1 });
 
 const ChatSession = mongoose.model('ChatSession', chatSessionSchema);
 

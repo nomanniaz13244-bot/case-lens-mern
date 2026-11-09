@@ -49,7 +49,7 @@ const createSession = async (req, res) => {
 // @access Private (JWT)
 const getHistory = async (req, res) => {
   try {
-    const sessions = await ChatSession.find({ userId: getUserId(req) })
+    const sessions = await ChatSession.find({ userId: getUserId(req), caseId: { $in: [null, undefined] } })
       .sort({ isPinned: -1, updatedAt: -1 })
       .limit(100)
       .select('_id title isPinned updatedAt');

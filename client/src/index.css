@@ -89,3 +89,9 @@ select {
   }
 }
 
+.line-stroke {
+  stroke: cyan;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
