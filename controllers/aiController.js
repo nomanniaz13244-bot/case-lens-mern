@@ -298,6 +298,17 @@ const defineTerm = async (req, res) => {
       });
     }
 
+    if (!process.env.GROQ_API_KEY) {
+      console.error('AI Define Term Error: GROQ_API_KEY is missing on the server.');
+      return res.status(503).json({
+        success: false,
+        message:
+          'The AI service is not configured on the server (GROQ_API_KEY missing). Please contact the administrator or try again later.',
+      });
+    }
+
+    console.log('AI Define Term request for:', rawTerm);
+
     const prompt =
       `You are a senior Pakistani lawyer. Define the legal term '${rawTerm}' strictly according to Pakistani Law (PPC, CrPC, Constitution of Pakistan). ` +
       'Provide the English definition, Urdu explanation, and a practical example relevant to Pakistani courts. ' +
@@ -310,7 +321,9 @@ const defineTerm = async (req, res) => {
       provider: 'groq',
       userPrompt: `Define "${rawTerm}" under Pakistani law.`,
       temperature: 0.2,
-      maxTokens: 1200,
+      // Reasoning models spend tokens on thinking before writing the answer —
+      // 1200 could starve the actual definition and yield an empty completion.
+      maxTokens: 3000,
     });
 
     // Models sometimes wrap JSON in ```json fences or add a short preamble.
@@ -356,10 +369,18 @@ const defineTerm = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('AI defineTerm error:', error?.message || String(error));
-    return res.status(500).json({
+    console.error('AI Define Term Error:', error);
+    const message =
+      error?.message || 'Unable to generate a definition right now. Please try again later.';
+
+    const status = /401|api key|unauthorized|invalid/i.test(message) ? 503 : 500;
+    const friendly = status === 503
+      ? 'The AI service is currently busy or misconfigured. Please try again later.'
+      : message;
+
+    return res.status(status).json({
       success: false,
-      message: error?.message || 'Unable to generate a definition right now.',
+      message: friendly,
     });
   }
 };

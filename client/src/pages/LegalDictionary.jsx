@@ -466,6 +466,8 @@ export default function LegalDictionary() {
     setAiLoading(true);
     setAiError('');
 
+    console.log('Sending term to AI definition:', termName);
+
     try {
       const response = await axios.post(
         '/api/ai/define-term',
@@ -486,11 +488,20 @@ export default function LegalDictionary() {
         aiGenerated: true,
       });
     } catch (requestError) {
-      setAiError(
-        requestError.response?.data?.message ||
-          requestError.message ||
-          'Unable to generate a definition right now. Please try again.'
-      );
+      const status = requestError.response?.status;
+      const serverMessage = requestError.response?.data?.message;
+
+      // Raw axios/network errors ("Request failed with status code 500") are
+      // useless to the user — map 5xx to a helpful, actionable message.
+      const friendlyMessage =
+        status >= 500
+          ? 'AI service is currently busy or misconfigured. Please try again later.'
+          : serverMessage ||
+            requestError.message ||
+            'Unable to generate a definition right now. Please try again.';
+
+      console.error('AI definition failed:', status, serverMessage || requestError.message);
+      setAiError(friendlyMessage);
     } finally {
       setAiLoading(false);
     }
