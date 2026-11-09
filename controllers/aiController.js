@@ -1,8 +1,65 @@
+const mongoose = require('mongoose');
 const LegalCase = require('../models/LegalCase');
+const ChatSession = require('../models/ChatSession');
+const { MAX_MESSAGES_PER_SESSION } = require('./chatSessionController');
 const { generateAIResponse } = require('../services/aiService');
 
 const CASE_NOT_FOUND_NOTE =
   'I could not find any relevant cases in the repository for your query. Could you please provide more details?';
+
+// ─── Chat-history persistence helpers ────────────────────────────────────────
+// Every real exchange is appended to the user's ChatSession. Failures here are
+// non-fatal: the chat itself keeps working even if saving history fails.
+
+const buildSessionTitle = (message) => {
+  const cleaned = String(message || '').replace(/\s+/g, ' ').trim();
+  if (!cleaned) return 'New Chat';
+  // Title from the first user message, truncated to 30 characters.
+  return cleaned.length <= 30 ? cleaned : `${cleaned.slice(0, 30)}...`;
+};
+
+const persistChatExchange = async (req, message, answer, citedCases) => {
+  try {
+    const userId = req.user?._id || req.user?.id;
+    if (!userId) return null; // route not authenticated — skip saving
+
+    const sessionId = String(req.body?.sessionId || req.body?.chatId || '').trim();
+    let session = null;
+
+    if (sessionId && mongoose.isValidObjectId(sessionId)) {
+      session = await ChatSession.findOne({ _id: sessionId, userId });
+    }
+
+    // No valid session id (or it belongs to someone else) — create one.
+    if (!session) {
+      session = await ChatSession.create({ userId, title: buildSessionTitle(message) });
+    }
+
+    // First exchange names the chat.
+    if (session.messages.length === 0) {
+      session.title = buildSessionTitle(message);
+    }
+
+    session.messages.push(
+      { role: 'user', text: message },
+      { role: 'assistant', text: answer, citedCases: Array.isArray(citedCases) ? citedCases : [] }
+    );
+
+    // Hard cap so one runaway conversation can't grow without bound.
+    if (session.messages.length > MAX_MESSAGES_PER_SESSION) {
+      session.messages.splice(
+        0,
+        session.messages.length - MAX_MESSAGES_PER_SESSION
+      );
+    }
+
+    await session.save();
+    return session;
+  } catch (error) {
+    console.error('Chat history save error:', error?.message || String(error));
+    return null;
+  }
+};
 
 const chatWithAI = async (req, res) => {
   try {
@@ -97,12 +154,14 @@ const chatWithAI = async (req, res) => {
     console.log('Found Cases:', relevantCases.length);
 
     if (relevantCases.length === 0) {
+      const refusalSession = await persistChatExchange(req, message, CASE_NOT_FOUND_NOTE, []);
       return res.status(200).json({
         success: true,
         data: {
           question: message,
           answer: CASE_NOT_FOUND_NOTE,
           citedCases: [],
+          ...(refusalSession ? { sessionId: refusalSession._id } : {}),
         },
       });
     }
@@ -136,12 +195,22 @@ const chatWithAI = async (req, res) => {
     // Consistency guarantee: if the AI explicitly says "no relevant cases",
     // never attach cited cases to that message — the UI must show both or neither.
     const refused = answer.toLowerCase().includes('could not find any relevant cases');
+    const refusedCitedCases = refused ? [] : citedCases;
+
+    const session = await persistChatExchange(
+      req,
+      message,
+      answer,
+      refusedCitedCases
+    );
+
     return res.status(200).json({
       success: true,
       data: {
         question: message,
         answer,
-        citedCases: refused ? [] : citedCases,
+        citedCases: refusedCitedCases,
+        ...(session ? { sessionId: session._id } : {}),
       },
     });
   } catch (error) {

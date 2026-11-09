@@ -7,6 +7,7 @@ const { seedCases } = require('./controllers/searchController');
 const adminCaseRoutes = require('./routes/adminCaseRoutes');
 const authRoutes = require('./routes/authRoutes');
 const aiRoutes = require('./routes/aiRoutes');
+const chatRoutes = require('./routes/chatRoutes');
 const workspaceRoutes = require('./routes/workspaceRoutes');
 const researchRoutes = require('./routes/researchRoutes');
 const caseLawRoutes = require('./routes/caseLawRoutes');
@@ -60,6 +61,8 @@ app.use('/api/admin/cases', adminCaseRoutes);
 
 // AI Legal Chat Module
 app.use('/api/ai', aiRoutes);
+// Chat-history sessions (legal AI assistant sidebar)
+app.use('/api/chat', chatRoutes);
 app.use('/api/workspace', workspaceRoutes);
 app.use('/api/research', researchRoutes);
 app.use('/api/case-laws', caseLawRoutes);
