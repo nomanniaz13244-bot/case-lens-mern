@@ -288,12 +288,12 @@ const editDraft = async (req, res) => {
 };
 
 // ─── GET /api/drafting ───────────────────────────────────────────────────────
-// @desc   List the signed-in user's saved drafts (newest first)
+// @desc   List the signed-in user's saved drafts (pinned first, newest first)
 // @access Private (JWT)
 const getDrafts = async (req, res) => {
   try {
     const drafts = await Draft.find({ userId: getUserId(req) })
-      .sort({ updatedAt: -1 })
+      .sort({ isPinned: -1, updatedAt: -1 })
       .limit(50)
       .select('-editHistory');
 
@@ -440,6 +440,52 @@ const deleteDraft = async (req, res) => {
   }
 };
 
+// ─── PATCH /api/drafting/:id/pin ─────────────────────────────────────────────
+// @desc   Toggle a draft's pinned status (true -> false, false -> true)
+// @access Private (JWT)
+const toggleDraftPin = async (req, res) => {
+  try {
+    if (!isValidId(req.params.id)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Draft not found.',
+      });
+    }
+
+    const draft = await Draft.findOne({
+      _id: req.params.id,
+      userId: getUserId(req),
+    });
+
+    if (!draft) {
+      return res.status(404).json({
+        success: false,
+        message: 'Draft not found.',
+      });
+    }
+
+    draft.isPinned = !draft.isPinned;
+    // updateDocument=false keeps updatedAt untouched: pinning is bookkeeping,
+    // not a content edit, and the list sorts on updatedAt.
+    await draft.save({ timestamps: false });
+
+    return res.status(200).json({
+      success: true,
+      message: draft.isPinned ? 'Draft pinned.' : 'Draft unpinned.',
+      data: {
+        _id: draft._id,
+        isPinned: draft.isPinned,
+      },
+    });
+  } catch (error) {
+    console.error('Toggle draft pin error:', error?.message || String(error));
+    return res.status(500).json({
+      success: false,
+      message: 'Unable to update the pin status.',
+    });
+  }
+};
+
 module.exports = {
   generateDraft,
   editDraft,
@@ -447,4 +493,5 @@ module.exports = {
   getDraftById,
   saveDraft,
   deleteDraft,
+  toggleDraftPin,
 };

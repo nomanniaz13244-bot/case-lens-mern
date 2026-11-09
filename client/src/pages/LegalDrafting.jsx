@@ -9,10 +9,14 @@ import {
   FileText,
   History,
   Loader2,
+  MoreVertical,
+  Pin,
+  PinOff,
   Printer,
   Save,
   Scale,
   Sparkles,
+  Trash2,
   Wand2,
 } from 'lucide-react';
 
@@ -153,6 +157,9 @@ export default function LegalDrafting() {
 
   const [drafts, setDrafts] = useState([]);
   const [loadingDrafts, setLoadingDrafts] = useState(true);
+  const [openMenuId, setOpenMenuId] = useState(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [pinnedBusyId, setPinnedBusyId] = useState(null);
 
   const isDirty = Boolean(content) && content !== lastSavedContent;
   const busy = generating || Boolean(editAction) || saving;
@@ -175,6 +182,18 @@ export default function LegalDrafting() {
   useEffect(() => {
     fetchDrafts();
   }, [fetchDrafts]);
+
+  // Close any open draft menu when clicking anywhere else on the page.
+  useEffect(() => {
+    if (!openMenuId) return undefined;
+
+    const closeMenu = (event) => {
+      if (event.target.closest?.('[data-draft-menu]')) return;
+      setOpenMenuId(null);
+    };
+    document.addEventListener('mousedown', closeMenu);
+    return () => document.removeEventListener('mousedown', closeMenu);
+  }, [openMenuId]);
 
   const resetMessages = () => {
     setError('');
@@ -325,6 +344,50 @@ export default function LegalDrafting() {
     setLastSavedContent(draft.generatedContent || '');
     setDraftId(draft._id || null);
     setNotice('Saved draft loaded into the editor.');
+  };
+
+  const handleTogglePin = async (draft) => {
+    setOpenMenuId(null);
+    if (pinnedBusyId) return;
+
+    setPinnedBusyId(draft._id);
+    try {
+      const response = await axios.patch(
+        `/api/drafting/${draft._id}/pin`,
+        {},
+        { timeout: 20000 }
+      );
+      setNotice(response.data?.message || 'Pin status updated.');
+      // The backend sorts pinned drafts first — refetch so the list reflects it.
+      await fetchDrafts();
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Unable to update the pin status.');
+    } finally {
+      setPinnedBusyId(null);
+    }
+  };
+
+  const handleDeleteDraft = async () => {
+    const draftIdToDelete = confirmDeleteId;
+    if (!draftIdToDelete) return;
+
+    const deletingLoadedDraft = draftIdToDelete === draftId;
+    setOpenMenuId(null);
+    setConfirmDeleteId(null);
+
+    try {
+      await axios.delete(`/api/drafting/${draftIdToDelete}`, { timeout: 20000 });
+      setDrafts((current) => current.filter((draft) => draft._id !== draftIdToDelete));
+      // If the draft open in the editor was deleted, reset to a fresh editor.
+      if (deletingLoadedDraft) {
+        setDraftId(null);
+        setContent('');
+        setLastSavedContent('');
+      }
+      setNotice('Draft deleted.');
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Unable to delete the draft.');
+    }
   };
 
   const handleNewDraft = () => {
@@ -541,20 +604,33 @@ export default function LegalDrafting() {
                   <ul className="space-y-1">
                     {drafts.map((draft) => {
                       const isActive = draft._id === draftId;
+                      const isMenuOpen = openMenuId === draft._id;
                       return (
-                        <li key={draft._id}>
+                        <li
+                          key={draft._id}
+                          className={`relative flex items-stretch gap-0 rounded-xl border transition ${
+                            isActive
+                              ? 'border-black bg-[#F5F5F5]'
+                              : 'border-transparent hover:border-[#E5E5E5] hover:bg-[#F5F5F5]'
+                          }`}
+                        >
                           <button
                             type="button"
                             onClick={() => handleLoadDraft(draft)}
-                            className={`w-full rounded-xl border px-3 py-2.5 text-left transition ${
-                              isActive
-                                ? 'border-black bg-[#F5F5F5]'
-                                : 'border-transparent hover:border-[#E5E5E5] hover:bg-[#F5F5F5]'
-                            }`}
+                            className="min-w-0 flex-1 rounded-l-xl px-3 py-2.5 text-left"
                           >
                             <div className="flex items-center justify-between gap-2">
-                              <span className="truncate text-xs font-semibold text-[#1A1A1A]">
-                                {draft.documentType}
+                              <span className="flex min-w-0 items-center gap-1.5">
+                                <span className="truncate text-xs font-semibold text-[#1A1A1A]">
+                                  {draft.documentType}
+                                </span>
+                                {draft.isPinned && (
+                                  <Pin
+                                    size={11}
+                                    className="shrink-0 fill-amber-400 text-amber-500"
+                                    aria-label="Pinned draft"
+                                  />
+                                )}
                               </span>
                               <span className="shrink-0 text-[9px] font-medium uppercase tracking-wide text-gray-400">
                                 {formatDate(draft.updatedAt || draft.createdAt)}
@@ -564,6 +640,53 @@ export default function LegalDrafting() {
                               {draft.instructions || 'No instructions saved'}
                             </p>
                           </button>
+
+                          {/* ── 3-dots menu: Pin / Unpin / Delete ─────────── */}
+                          <div className="relative flex items-center pr-1.5" data-draft-menu>
+                            <button
+                              type="button"
+                              aria-label={`Options for ${draft.documentType} draft`}
+                              title="Draft options"
+                              onClick={() =>
+                                setOpenMenuId(isMenuOpen ? null : draft._id)
+                              }
+                              className="rounded-lg p-1.5 text-gray-400 transition hover:bg-[#E5E5E5] hover:text-gray-700"
+                            >
+                              <MoreVertical size={15} strokeWidth={1.9} aria-hidden="true" />
+                            </button>
+
+                            {isMenuOpen && (
+                              <div className="absolute right-0 top-full z-20 mt-1.5 w-40 overflow-hidden rounded-xl border border-[#E5E5E5] bg-white py-1 shadow-lg">
+                                <button
+                                  type="button"
+                                  disabled={pinnedBusyId === draft._id}
+                                  onClick={() => handleTogglePin(draft)}
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] font-semibold text-[#1A1A1A] transition hover:bg-[#F5F5F5] disabled:opacity-50"
+                                >
+                                  {pinnedBusyId === draft._id ? (
+                                    <Loader2 size={13} className="animate-spin" aria-hidden="true" />
+                                  ) : draft.isPinned ? (
+                                    <PinOff size={13} strokeWidth={2} aria-hidden="true" />
+                                  ) : (
+                                    <Pin size={13} strokeWidth={2} aria-hidden="true" />
+                                  )}
+                                  {draft.isPinned ? 'Unpin' : 'Pin'}
+                                </button>
+                                <div className="my-1 h-px bg-[#E5E5E5]" />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenMenuId(null);
+                                    setConfirmDeleteId(draft._id);
+                                  }}
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] font-semibold text-red-600 transition hover:bg-red-50"
+                                >
+                                  <Trash2 size={13} strokeWidth={2} aria-hidden="true" />
+                                  Delete
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </li>
                       );
                     })}
@@ -751,6 +874,50 @@ export default function LegalDrafting() {
           </section>
         </div>
       </div>
+
+      {/* ── Delete-confirmation modal ───────────────────────────────────────── */}
+      {confirmDeleteId && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(event) => {
+            // Click on the backdrop only — ignore clicks from the dialog box.
+            if (event.target !== event.currentTarget) return;
+            setConfirmDeleteId(null);
+          }}
+        >
+          <div className="w-full max-w-sm rounded-2xl border border-[#E5E5E5] bg-white p-5 shadow-xl">
+            <div className="flex items-start gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-50 text-red-600">
+                <Trash2 size={18} strokeWidth={2} aria-hidden="true" />
+              </span>
+              <div>
+                <h3 className="text-sm font-bold text-[#1A1A1A]">Delete this draft?</h3>
+                <p className="mt-1 text-xs leading-relaxed text-gray-500">
+                  Are you sure you want to delete this draft? This action cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteId(null)}
+                className="rounded-xl border border-[#E5E5E5] px-4 py-2 text-xs font-bold text-gray-700 transition hover:bg-[#F5F5F5]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteDraft}
+                className="rounded-xl bg-red-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-red-700"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

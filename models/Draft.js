@@ -48,14 +48,20 @@ const draftSchema = new mongoose.Schema(
         editedAt: { type: Date, default: Date.now },
       },
     ],
+
+    // Pinned drafts float to the top of the saved drafts list.
+    isPinned: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true, // createdAt & updatedAt
   }
 );
 
-// Fast lookup of a user's drafts, newest first.
-draftSchema.index({ userId: 1, updatedAt: -1 });
+// Fast lookup of a user's drafts: pinned first, then newest.
+draftSchema.index({ userId: 1, isPinned: -1, updatedAt: -1 });
 
 const Draft = mongoose.model('Draft', draftSchema);
 

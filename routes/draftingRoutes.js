@@ -7,6 +7,7 @@ const {
   getDraftById,
   saveDraft,
   deleteDraft,
+  toggleDraftPin,
 } = require('../controllers/draftingController');
 const { protect } = require('../middleware/authMiddleware');
 
@@ -17,5 +18,6 @@ router.get('/', protect, getDrafts);
 router.get('/:id', protect, getDraftById);
 router.put('/:id', protect, saveDraft);
 router.delete('/:id', protect, deleteDraft);
+router.patch('/:id/pin', protect, toggleDraftPin);
 
 module.exports = router;
