@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import {
+  ChevronsRight,
   ChevronLeft,
-  ChevronRight,
   MessageSquare,
   MoreVertical,
   Pin,
@@ -368,9 +368,9 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
             className="flex h-9 w-full items-center justify-center rounded-lg text-gray-500 transition hover:bg-[#F5F5F5] hover:text-[#1A1A1A]"
           >
             {isSidebarOpen ? (
-              <ChevronRight size={17} strokeWidth={2.2} aria-hidden="true" />
+              <ChevronLeft size={20} strokeWidth={2.2} aria-hidden="true" />
             ) : (
-              <ChevronLeft size={17} strokeWidth={2.2} aria-hidden="true" />
+              <ChevronsRight size={20} strokeWidth={2.2} aria-hidden="true" />
             )}
           </button>
 
@@ -381,10 +381,10 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
             disabled={isTyping}
             title="New Chat"
             className={`flex items-center justify-center rounded-xl bg-black text-sm font-bold text-white shadow-sm transition hover:bg-gray-800 disabled:opacity-50 ${
-              isSidebarOpen ? 'w-full gap-2 px-4 py-3' : 'h-9 w-9 text-transparent'
+              isSidebarOpen ? 'w-full gap-2 px-4 py-3' : 'h-9 w-9'
             }`}
           >
-            <Plus size={16} strokeWidth={2.5} aria-hidden="true" />
+            <Plus size={20} strokeWidth={2.5} aria-hidden="true" />
             {isSidebarOpen && 'New Chat'}
           </button>
         </div>
