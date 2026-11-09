@@ -46,12 +46,14 @@ Additional Pakistani drafting rules:
 - Never invent names, dates, amounts, statutory sections, or facts. Use bracketed placeholders such as [Client Name], [Opposite Party], [Court], [Date], [Amount], [Section] whenever the information is missing.
 - Return ONLY the finished draft text. Do not include explanations, commentary, markdown code fences, or notes.`;
 
-const buildEditPrompt = (instruction) => `You are a senior Pakistani lawyer and legal editor. Rewrite the legal draft supplied in the Context according to this instruction: "${instruction}".
+const buildEditPrompt = (instruction) => `You are a legal editor. Modify the following text according to this instruction: ${instruction}.
 
 Rules:
+- You MUST actually rewrite the text. Do NOT return the original text unchanged. Rephrase sentences and restructure paragraphs so the output is visibly different from the input.
+- Return ONLY the updated legal text, without any conversational filler like 'Here is the updated text'.
 - Preserve every fact, name, date, amount, statutory reference, and bracketed placeholder from the original draft. Do not invent new facts.
 - Preserve the professional Pakistani legal format, headings, numbered paragraphs, prayer/relief clause, and signature blocks.
-- Improve only what the instruction asks for. Keep the legal meaning intact.
+- Keep the legal meaning intact.
 - Return ONLY the revised draft text. Do not include explanations, commentary, markdown code fences, or notes.`;
 
 // ─── POST /api/drafting/generate ─────────────────────────────────────────────
@@ -176,14 +178,28 @@ const editDraft = async (req, res) => {
       }
     }
 
+    console.log(
+      `Draft edit request — instruction: "${instruction}" | text length: ${text.length}`
+    );
+    console.log('Draft text sent to AI:', text);
+
     const revisedContent = await generateAIResponse(
       buildEditPrompt(instruction),
       text,
       {
-        userPrompt: `Rewrite the draft according to this instruction: ${instruction}`,
-        ...getDraftingOptions(4000),
+        userPrompt: `Modify the draft according to this instruction: ${instruction}. Return only the updated legal text.`,
+        ...getDraftingOptions(8000),
+        // Rewriting needs some latitude — 0.2 makes the model echo the input.
+        temperature: 0.4,
       }
     );
+
+    if (!String(revisedContent || '').trim()) {
+      return res.status(502).json({
+        success: false,
+        message: 'The AI did not return a revised draft. Please try again.',
+      });
+    }
 
     if (draft) {
       draft.editHistory.push({
@@ -211,6 +227,7 @@ const editDraft = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: 'Draft updated successfully.',
+      content: draft.generatedContent,
       data: draft,
     });
   } catch (error) {

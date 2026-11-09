@@ -234,11 +234,14 @@ export default function LegalDrafting() {
     resetMessages();
     setEditAction(mode);
 
+    const currentText = content;
+    console.log('Sending text to edit:', currentText);
+
     try {
       const response = await axios.post(
         '/api/drafting/edit',
         {
-          text: content,
+          text: currentText,
           instruction: AI_INSTRUCTIONS[mode],
           draftId,
           documentType,
@@ -249,7 +252,10 @@ export default function LegalDrafting() {
 
       const draft = response.data?.data;
       const revisedContent =
-        draft?.generatedContent || response.data?.generatedContent || '';
+        draft?.generatedContent ||
+        response.data?.content ||
+        response.data?.generatedContent ||
+        '';
 
       if (!String(revisedContent).trim()) {
         throw new Error('The AI service returned an empty revision. Please try again.');
