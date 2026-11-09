@@ -8,6 +8,9 @@ import Dashboard from './pages/Dashboard';
 import CaseDetail from './pages/CaseDetail';
 import CaseWorkspace from './pages/CaseWorkspace';
 import ComingSoon from './pages/ComingSoon';
+import LegalDrafting from './pages/LegalDrafting';
+import LegalResearch from './pages/LegalResearch';
+import CaseLawsPage from './pages/CaseLaws';
 import MyCases from './pages/MyCases';
 import Facts from './pages/case-tabs/Facts';
 import LegalIssues from './pages/case-tabs/LegalIssues';
@@ -37,11 +40,11 @@ export default function App() {
                 <Route path="/workspace" element={protectedPage(<CaseWorkspace />)} />
                 <Route path="/my-cases" element={protectedPage(<MyCases />)} />
                 <Route path="/ai-chat" element={protectedPage(<AIChat />)} />
-                <Route path="/research" element={protectedPage(<ComingSoon />)} />
-                <Route path="/laws" element={protectedPage(<ComingSoon />)} />
+                <Route path="/research" element={protectedPage(<LegalResearch />)} />
+                <Route path="/laws" element={protectedPage(<CaseLawsPage />)} />
                 <Route path="/analysis" element={protectedPage(<ComingSoon />)} />
                 <Route path="/opposition" element={protectedPage(<ComingSoon />)} />
-                <Route path="/drafting" element={protectedPage(<ComingSoon />)} />
+                <Route path="/drafting" element={protectedPage(<LegalDrafting />)} />
                 <Route path="/dictionary" element={protectedPage(<ComingSoon />)} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />

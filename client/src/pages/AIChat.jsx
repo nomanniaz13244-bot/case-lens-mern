@@ -54,6 +54,7 @@ How can I assist your legal matter today?`,
 
   const [inputPrompt, setInputPrompt] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [toast, setToast] = useState(null);
   const [activeChatId, setActiveChatId] = useState('1');
   const [chatHistory, setChatHistory] = useState(INITIAL_CONVERSATIONS);
   const [copiedId, setCopiedId] = useState(null);
@@ -78,6 +79,12 @@ How can I assist your legal matter today?`,
   const handleSend = async () => {
     const trimmed = inputPrompt.trim();
     if (!trimmed || isTyping) return;
+
+    // UX gate: an incomplete question would only produce noisy search results.
+    if (trimmed.length < 3) {
+      setToast('Please ask a complete question.');
+      return;
+    }
 
     const timestamp = new Date().toLocaleTimeString([], {
       hour: '2-digit',
@@ -160,8 +167,14 @@ How can I assist your legal matter today?`,
     }
   };
 
-  const handleNewChat = () => {
-    const newChatId = String(Date.now());
+  // Auto-dismiss the toast a few seconds after it appears.
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timer = setTimeout(() => setToast(null), 2500);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  const handleNewChat = () => {    const newChatId = String(Date.now());
     const newChatTitle = 'New Legal Inquiry';
     setChatHistory((prev) => [{ id: newChatId, title: newChatTitle, timestamp: 'Just now' }, ...prev]);
     setActiveChatId(newChatId);
@@ -417,9 +430,9 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
               {/* Send Button */}
               <button
                 onClick={handleSend}
-                disabled={!inputPrompt.trim() || isTyping}
+                disabled={inputPrompt.trim().length < 3 || isTyping}
                 className={`absolute right-2.5 p-2 rounded-xl flex items-center justify-center transition-all ${
-                  inputPrompt.trim() && !isTyping
+                  inputPrompt.trim().length >= 3 && !isTyping
                     ? 'bg-[#000000] text-white shadow-sm'
                     : 'bg-gray-200 text-gray-500 cursor-not-allowed'
                 }`}
@@ -430,6 +443,13 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
                 </svg>
               </button>
             </div>
+
+            {/* Inline toast for UX validation messages */}
+            {toast && (
+              <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-center text-xs font-medium text-amber-800 shadow-sm">
+                {toast}
+              </div>
+            )}
 
             {/* Disclaimer Subtitle */}
             <p className="text-[11px] text-center text-gray-400 mt-2">

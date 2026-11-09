@@ -1,44 +1,10 @@
 const LegalCase = require('../models/LegalCase');
 const { generateAIResponse } = require('../services/aiService');
-const {
-  DEMO_BYPASS,
-  getDemoCaseById,
-  demoAnswer,
-  seedDemoCases,
-  listDemoCases,
-} = require('../config/demoBypass');
+
+const CASE_NOT_FOUND_NOTE =
+  'I could not find any relevant cases in the repository for your query. Could you please provide more details?';
 
 const chatWithAI = async (req, res) => {
-  // ⚠️ DEMO BYPASS: canned legal answer + demo cited cases, no DB queries.
-  if (DEMO_BYPASS) {
-    const message = String(req.body?.message ?? req.body?.question ?? req.body?.prompt ?? req.body?.query ?? '').trim();
-    if (!message) {
-      return res.status(400).json({
-        success: false,
-        message: 'A message is required to process the AI request.',
-      });
-    }
-    seedDemoCases();
-    const demoCases = listDemoCases();
-    const citedCases = demoCases.slice(0, 3).map((legalCase, index) => ({
-      caseTitle: legalCase.caseTitle,
-      citation: legalCase.citation,
-      courtName: legalCase.courtName,
-      summary:
-        String(legalCase.summary || '').replace(/\s+/g, ' ').trim().slice(0, 1500),
-      reference: `[${index + 1}]`,
-    }));
-    const answer =
-      `Demo Mode: Here is a legal analysis of your question — "${message}". ` +
-      `The key considerations are the procedural compliance of the recovery/record and the applicable statutory framework. ` +
-      `Refer to the cited precedents for how similar matters were decided. (Database bypassed for this demo session.)`;
-    return res.status(200).json({
-      success: true,
-      message: 'Demo answer (Demo Bypass)',
-      data: { question: message, answer, citedCases },
-    });
-  }
-
   try {
     const raw =
       req.body?.message ??
@@ -62,6 +28,22 @@ const chatWithAI = async (req, res) => {
       });
     }
 
+    const query = message;
+    console.log('Global Search Query:', query);
+
+    // Too-short input ("D", "ok", "?") — searching would only produce noise,
+    // so ask for a complete question instead of guessing.
+    if (message.length < 5) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          question: message,
+          answer: 'Please ask a complete question so I can search the case repository effectively.',
+          citedCases: [],
+        },
+      });
+    }
+
     const commonWords = new Set([
       'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'can', 'case', 'cases',
       'do', 'for', 'from', 'give', 'how', 'in', 'is', 'me', 'of', 'on', 'tell',
@@ -74,35 +56,52 @@ const chatWithAI = async (req, res) => {
         .split(/\s+/)
         .filter((word) => word.length >= 3 && !commonWords.has(word))
     )];
-
     const effectiveKeywords = searchKeywords.length > 0 ? searchKeywords : [message.trim()];
-    const regexConditions = effectiveKeywords.flatMap((keyword) => {
-      const pattern = { $regex: escapeRegex(keyword), $options: 'i' };
-      return [
-        { caseTitle: pattern },
-        { summary: pattern },
-        { keywords: pattern },
-      ];
-    });
 
-    let relevantCases = regexConditions.length > 0
-      ? await LegalCase.find({ $or: regexConditions })
-          .limit(3)
-          .select('caseTitle citation courtName summary keywords -_id')
-      : [];
-
-    if (relevantCases.length === 0) {
-      relevantCases = await LegalCase.find({})
+    // ─── Global RAG search ──────────────────────────────────────────────────
+    // 1) Ranked full-text search (uses the collection's text index), then
+    // 2) keyword regex fallback. There is NO random-case fallback: if nothing
+    // matches, the assistant honestly reports that no relevant cases exist.
+    let relevantCases = [];
+    try {
+      relevantCases = await LegalCase
+        .find(
+          { $text: { $search: effectiveKeywords.join(' ') } },
+          { score: { $meta: 'textScore' } }
+        )
+        .sort({ score: { $meta: 'textScore' } })
         .limit(3)
         .select('caseTitle citation courtName summary keywords -_id');
+    } catch (textSearchError) {
+      // Text index missing/unavailable — fall back to regex below.
+      relevantCases = [];
     }
+
+    if (relevantCases.length === 0) {
+      const regexConditions = effectiveKeywords.flatMap((keyword) => {
+        const pattern = { $regex: escapeRegex(keyword), $options: 'i' };
+        return [
+          { caseTitle: pattern },
+          { summary: pattern },
+          { facts: pattern },
+          { legalLaws: pattern },
+        ];
+      });
+      if (regexConditions.length > 0) {
+        relevantCases = await LegalCase.find({ $or: regexConditions })
+          .limit(3)
+          .select('caseTitle citation courtName summary keywords -_id');
+      }
+    }
+
+    console.log('Found Cases:', relevantCases.length);
 
     if (relevantCases.length === 0) {
       return res.status(200).json({
         success: true,
         data: {
           question: message,
-          answer: 'No cases are currently available in the database, so I cannot provide a case-based answer yet.',
+          answer: CASE_NOT_FOUND_NOTE,
           citedCases: [],
         },
       });
@@ -129,17 +128,20 @@ const chatWithAI = async (req, res) => {
     console.log('Context sent to AI:\n', contextString);
 
     const answer = await generateAIResponse(
-      "You are a legal AI assistant. You MUST answer the user's question using ONLY the provided Context below. If the answer is not in the context, say 'I could not find this information in the database.' Do NOT use your general knowledge.",
+      `You are a legal AI assistant. You MUST answer the user's question using ONLY the provided Context below. Do NOT use your general knowledge or any external case law. Only cite the cases provided in the context. If none are provided, do not cite any cases. If the answer is not in the context, say exactly: '${CASE_NOT_FOUND_NOTE}'`,
       contextString,
       { userPrompt: message, temperature: 0.2, maxTokens: 1000 }
     );
 
+    // Consistency guarantee: if the AI explicitly says "no relevant cases",
+    // never attach cited cases to that message — the UI must show both or neither.
+    const refused = answer.toLowerCase().includes('could not find any relevant cases');
     return res.status(200).json({
       success: true,
       data: {
         question: message,
         answer,
-        citedCases,
+        citedCases: refused ? [] : citedCases,
       },
     });
   } catch (error) {
@@ -153,21 +155,6 @@ const chatWithAI = async (req, res) => {
 };
 
 const caseSpecificChat = async (req, res) => {
-  // ⚠️ DEMO BYPASS: answer from the in-memory case store — no DB, no AI provider.
-  if (DEMO_BYPASS) {
-    const { caseId, question } = req.body;
-    if (!caseId || !String(question || '').trim()) {
-      return res.status(400).json({ success: false, message: 'caseId and question are required.' });
-    }
-    const demoCase = getDemoCaseById(caseId);
-    // Unknown demo IDs still get a usable answer so the chat box never dead-ends.
-    return res.status(200).json({
-      success: true,
-      message: 'Demo answer (Demo Bypass)',
-      data: { answer: demoAnswer(question, demoCase) },
-    });
-  }
-
   try {
     const { caseId, question } = req.body;
     if (!caseId || !String(question || '').trim()) {
@@ -179,17 +166,21 @@ const caseSpecificChat = async (req, res) => {
     const laws = Array.isArray(legalCase.legalLaws) && legalCase.legalLaws.length
       ? legalCase.legalLaws
       : (legalCase.lawsApplied || []);
+
+    // Cap each field so the total prompt stays well under Groq's free-tier
+    // tokens-per-minute limit (8000 TPM) with real Atlas case documents.
+    const cap = (value, max) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
     const context = [
-      `Title: ${legalCase.caseTitle || ''}`,
-      `Summary: ${legalCase.summary || ''}`,
-      `Facts: ${legalCase.facts || 'Not available'}`,
-      `Legal Laws: ${(laws || []).join(', ') || 'Not available'}`,
-      `Full Text: ${legalCase.fullText || ''}`,
-      `Verdict: ${legalCase.verdict || ''}`,
+      `Title: ${cap(legalCase.caseTitle, 200)}`,
+      `Summary: ${cap(legalCase.summary, 2000) || 'Not available'}`,
+      `Facts: ${cap(legalCase.facts, 4000) || 'Not available'}`,
+      `Legal Laws: ${cap((laws || []).join(', '), 1500) || 'Not available'}`,
+      `Full Text (excerpt): ${cap(legalCase.fullText, 12000) || 'Not available'}`,
+      `Verdict: ${cap(legalCase.verdict, 1500)}`,
     ].join('\n');
 
     const answer = await generateAIResponse(
-      'You are a Pakistani legal assistant. Answer ONLY using the provided context for this specific case. If the answer is not present in the context, say "I could not find this information in the case data." Do not use general knowledge, external case databases, or information from other cases.',
+      'You are a Pakistani legal assistant for this specific case. Answer based ONLY on the provided context. If you don\'t know, say so — do not use general knowledge, external case databases, or information from other cases.',
       context,
       { userPrompt: String(question).trim(), temperature: 0.2, maxTokens: 1000 }
     );
@@ -239,4 +230,87 @@ const simpleCaseChat = async (req, res) => {
   }
 };
 
-module.exports = { chatWithAI, caseSpecificChat, simpleCaseChat };
+// ─── Explain Law (Legal Research module) ─────────────────────────────────────
+// Frontend sends { text, instruction }; we hand the raw section text or the
+// judgment excerpt to Groq with a lawyer-friendly default instruction and
+// return the plain-language explanation / summary.
+const explainLaw = async (req, res) => {
+  try {
+    const text = String(req.body?.text ?? '').trim();
+    const instruction = String(req.body?.instruction ?? '').trim();
+
+    if (!text) {
+      return res.status(400).json({
+        success: false,
+        message: 'The section or judgment text is required.',
+      });
+    }
+    if (text.length > 20000) {
+      return res.status(400).json({
+        success: false,
+        message: 'The provided text is too long. Limit it to 20000 characters.',
+      });
+    }
+
+    const systemPrompt =
+      instruction ||
+      'You are a strict legal explainer. I will provide you with a text. Explain or summarize it using ONLY the provided text. Do NOT use your outside knowledge. Do not add extra sections, laws, or details that are not present in the text below. If the text is short, your explanation must also be short.';
+    const cappedText = text.replace(/\s+/g, ' ').trim().slice(0, 12000);
+
+    console.log('Explain Law request — text length:', cappedText.length, '| custom instruction:', Boolean(instruction));
+    console.log('Explain text sent to AI:', cappedText);
+
+    const answer = await generateAIResponse(
+      systemPrompt,
+      cappedText,
+      { temperature: 0.2, maxTokens: 1500 }
+    );
+
+    return res.status(200).json({ success: true, data: { answer } });
+  } catch (error) {
+    console.error('Explain law error:', error?.message || String(error));
+    return res.status(500).json({
+      success: false,
+      message: error?.message || 'Unable to explain the provided legal text.',
+    });
+  }
+};
+
+// ─── Summarize Judgment / Extract Principles (Case Laws module) ─────────────
+// Both take the raw judgment text and respond strictly from it — the same
+// anti-hallucination contract as explain-law.
+const LIMIT_THAT_NOTE = 'The judgment text is required.';
+
+const SUMMARIZE_SYSTEM_PROMPT =
+  'You are a strict legal summarizer. Use ONLY the provided judgment text. Do not hallucinate. Do not invent facts, sections, laws, or citations that are not present in the text below. Summarize the judgment in this structure: Overview, Key Facts, Legal Issues, Court\'s Decision & Reasoning. If the text is short, your summary must also be short.';
+
+const PRINCIPLES_SYSTEM_PROMPT =
+  'You are a strict legal analyst. Use ONLY the provided judgment text. Do not hallucinate. Do not invent facts, sections, laws, or citations that are not present in the text below. Extract the judgment\'s legal principles as bullet points under these headings: Key Facts, Legal Issues, Arguments Both Sides (only if present), Court Decision, Precedent Value. If the text is short, keep it brief.';
+
+const runStrictJudgmentTool = async (req, res, systemPrompt) => {
+  try {
+    const text = String(req.body?.text ?? '').trim();
+    const instruction = String(req.body?.instruction ?? '').trim();
+
+    if (!text) {
+      return res.status(400).json({ success: false, message: LIMIT_THAT_NOTE });
+    }
+    if (text.length > 40000) {
+      return res.status(400).json({ success: false, message: 'The judgment text is too long. Limit it to 40000 characters.' });
+    }
+
+    const cappedText = text.replace(/\s+/g, ' ').trim().slice(0, 12000);
+    console.log('Judgment AI tool — text length:', cappedText.length, '| tool:', systemPrompt.slice(10, 40));
+
+    const answer = await generateAIResponse(systemPrompt, cappedText, { temperature: 0.2, maxTokens: 1500 });
+    return res.status(200).json({ success: true, data: { answer } });
+  } catch (error) {
+    console.error('Judgment AI tool error:', error?.message || String(error));
+    return res.status(500).json({ success: false, message: error?.message || 'Unable to process the judgment text.' });
+  }
+};
+
+const summarizeJudgment = async (req, res) => runStrictJudgmentTool(req, res, SUMMARIZE_SYSTEM_PROMPT);
+const extractPrinciples = async (req, res) => runStrictJudgmentTool(req, res, PRINCIPLES_SYSTEM_PROMPT);
+
+module.exports = { chatWithAI, caseSpecificChat, simpleCaseChat, explainLaw, summarizeJudgment, extractPrinciples };

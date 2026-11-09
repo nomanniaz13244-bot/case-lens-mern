@@ -4,12 +4,6 @@ const { createWorker } = require('tesseract.js');
 const { PDFParse } = require('pdf-parse');
 const { Readable } = require('stream');
 const { generateAIResponse } = require('../services/aiService');
-const {
-  DEMO_BYPASS,
-  createDemoCase,
-  getDemoCaseById,
-  listDemoCases,
-} = require('../config/demoBypass');
 
 const MAX_IMPORT_ROWS = 5000;
 const REQUIRED_CSV_HEADERS = ['caseTitle', 'courtName', 'summary'];
@@ -231,36 +225,6 @@ const parseAnalysisJson = (content) => {
 // @route   POST /api/workspace/create
 // @access  Protected
 const createWorkspaceCase = async (req, res) => {
-  // ⚠️ DEMO BYPASS: no AI call, no DB save — fabricate a full case object
-  // (caseTitle, summary, facts, legalLaws, pastCases…) in memory and return a
-  // usable caseId so the client can navigate straight to the Case Detail page.
-  if (DEMO_BYPASS) {
-    try {
-      let sourceText = String(req.body?.text || req.body?.fullText || '').trim();
-      if (req.file) {
-        try {
-          sourceText = (await extractDocumentText(req.file)).trim();
-        } catch (extractError) {
-          console.warn('Demo bypass: document extraction failed:', extractError.message);
-          sourceText = `Uploaded document: ${req.file?.originalname || 'file'}`;
-        }
-      }
-      if (!sourceText) {
-        return res.status(400).json({ success: false, message: 'Provide legal text or upload a PDF/image file.' });
-      }
-      const newCase = createDemoCase({ sourceText, createdBy: req.user?.id || req.user?._id });
-      return res.status(201).json({
-        success: true,
-        message: 'Workspace case created successfully (Demo Bypass — database unreachable).',
-        caseId: newCase._id,
-        data: newCase,
-      });
-    } catch (demoError) {
-      console.error('Demo bypass createWorkspaceCase error:', demoError);
-      return res.status(500).json({ success: false, message: 'Demo bypass failed while creating the case.' });
-    }
-  }
-
   try {
     let sourceText = String(req.body?.text || req.body?.fullText || '').trim();
     if (req.file) sourceText = (await extractDocumentText(req.file)).trim();
@@ -268,36 +232,71 @@ const createWorkspaceCase = async (req, res) => {
     if (!sourceText) {
       return res.status(400).json({ success: false, message: 'Provide legal text or upload a PDF/image file.' });
     }
-    const prompt = `You are a Pakistani legal AI. Analyze this case text and return a strict JSON object with these exact keys and string values (no markdown, just raw JSON):
+    const prompt = `You are a Pakistani legal AI. You MUST output a JSON object with EXACTLY these keys and value types: { summary: String, citation: String, facts: String, legalIssues: String, lawsApplied: String, precedentComparison: String, supportingContradicting: String, opposingArguments: String, strengthsWeaknesses: String }. For "legalIssues" and "lawsApplied", write each item on its own line prefixed with "- ". For "citation", extract the case's legal citation if it appears in the text (e.g. "2024 PECA 20" or "PLD 2024 SC 123") — if none is present, return an empty string "". Return ONLY the raw JSON object — no markdown formatting like \`\`\`json fences, no explanations, and no keys outside this list.
 {
   "summary": "Brief summary of the case",
   "facts": "Detailed facts and timeline of the case",
-  "caseLaws": "Relevant Pakistani case laws cited or applicable",
+  "legalIssues": "- Issue 1\\n- Issue 2",
+  "lawsApplied": "- Law or statute 1\\n- Law or statute 2",
   "precedentComparison": "How this case compares to similar past cases",
   "supportingContradicting": "Evidence supporting and contradicting the claims",
   "opposingArguments": "What the opposing counsel would argue",
   "strengthsWeaknesses": "Strengths and weaknesses of the current case"
 }`;
-    const analysisText = await generateAIResponse(
+    const aiRawResponse = await generateAIResponse(
       prompt,
       sourceText.slice(0, 12000),
-      { temperature: 0.1, maxTokens: 1000, json: true }
+      { temperature: 0.1, maxTokens: 2800, json: true }
     );
-    const analysis = parseAnalysisJson(analysisText);
+    console.log('RAW AI:', aiRawResponse);
+    const parsedData = parseAnalysisJson(aiRawResponse);
+    console.log('PARSED DATA:', parsedData);
 
-    const summary = String(analysis.summary || sourceText.slice(0, 500)).trim();
-    const facts = String(analysis.facts || '').trim();
-    const caseLaws = String(analysis.caseLaws || '').trim();
-    const precedentComparison = String(analysis.precedentComparison || '').trim();
-    const supportingContradicting = String(analysis.supportingContradicting || '').trim();
-    const opposingArguments = String(analysis.opposingArguments || '').trim();
-    const strengthsWeaknesses = String(analysis.strengthsWeaknesses || '').trim();
-    const legalLaws = caseLaws ? caseLaws.split(/[;\n]/).map((item) => item.trim()).filter(Boolean) : [];
+    const defaultIfMissing = (value, sourceFallback) =>
+      String(value || '').trim() || String(sourceFallback || '').trim() || 'Not available';
+    // Strings per the strict contract; tolerate an array response defensively.
+    const readString = (key, sourceFallback) => {
+      const value = parsedData[key];
+      if (value == null) return defaultIfMissing(null, sourceFallback);
+      if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean).join('\n') || defaultIfMissing(value, sourceFallback);
+      return defaultIfMissing(String(value), sourceFallback);
+    };
+
+    const summary = readString('summary', sourceText.slice(0, 500));
+    const facts = readString('facts');
+    const caseLaws = readString('caseLaws');
+    const precedentComparison = readString('precedentComparison');
+    const supportingContradicting = readString('supportingContradicting');
+    const opposingArguments = readString('opposingArguments');
+    const strengthsWeaknesses = readString('strengthsWeaknesses');
+    // legalIssues / lawsApplied saved as arrays (schema contract), parsed from
+    // the lines the AI produced — or the literal string if it ignored the format.
+    const normalizeList = (value) => {
+      if (value == null) return [];
+      const asString = Array.isArray(value)
+        ? value.map((item) => String(item).trim()).filter(Boolean).join('\n')
+        : String(value).trim();
+      if (!asString) return [];
+      return asString.split(/\n|;/)
+        .map((item) => item.trim().replace(/^[-*\d.]+\s*/, ''))
+        .filter(Boolean);
+    };
+    const legalIssues = normalizeList(parsedData.legalIssues);
+    const lawsApplied = normalizeList(parsedData.lawsApplied);
+    const legalLaws = lawsApplied.length
+      ? lawsApplied
+      : (caseLaws && caseLaws !== 'Not available'
+          ? caseLaws.split(/[;\n]/).map((item) => item.trim()).filter(Boolean)
+          : []);
     const citations = caseLaws;
+    // Citation: only a user-provided citation or one the AI extracted from the
+    // case text. Never a fallback string — an empty string is valid now that
+    // the unique index on citation is dropped.
+    const aiCitation = typeof parsedData.citation === 'string' ? parsedData.citation.trim() : '';
+    const providedCitation = String(req.body?.citation || '').trim();
+    const citation = providedCitation || aiCitation || '';
     const keyFacts = facts ? facts.split(/[;\n]/).map((item) => item.trim()).filter(Boolean) : [];
     const timeline = facts ? [facts] : [];
-    const providedCitation = String(req.body?.citation || citations || '').trim();
-    const citation = providedCitation || `WORKSPACE-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
     const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const searchTerms = [...keyFacts, ...legalLaws, summary]
@@ -343,8 +342,9 @@ const createWorkspaceCase = async (req, res) => {
       supportingContradicting,
       opposingArguments,
       strengthsWeaknesses,
+      legalIssues,
       legalLaws,
-      lawsApplied: legalLaws,
+      lawsApplied,
       pastCases,
       createdBy: req.user.id || req.user._id,
     });
@@ -367,19 +367,6 @@ const createCaseWithAIAnalysis = createWorkspaceCase;
 // @route   GET /api/workspace/case/:caseId
 // @access  Protected
 const getCaseById = async (req, res) => {
-  // ⚠️ DEMO BYPASS: serve from the in-memory store (clone without pastCases).
-  if (DEMO_BYPASS) {
-    const demoCase = getDemoCaseById(req.params.caseId);
-    if (!demoCase) {
-      return res.status(404).json({ success: false, message: 'Case not found. (Demo Bypass — run POST /api/workspace/create first)' });
-    }
-    return res.status(200).json({
-      success: true,
-      message: 'Demo case fetched (Demo Bypass)',
-      data: demoCase,
-    });
-  }
-
   try {
     const legalCase = await LegalCase.findById(req.params.caseId).lean();
     if (!legalCase) {
@@ -406,17 +393,6 @@ const getCaseById = async (req, res) => {
 // @route   GET /api/workspace/my-cases
 // @access  Protected
 const getUserCases = async (req, res) => {
-  // ⚠️ DEMO BYPASS: serve seeded + newly created in-memory cases.
-  if (DEMO_BYPASS) {
-    const demoCases = listDemoCases(req.user?.id || req.user?._id);
-    return res.status(200).json({
-      success: true,
-      count: demoCases.length,
-      message: 'Demo cases fetched (Demo Bypass)',
-      data: demoCases,
-    });
-  }
-
   try {
     const userId = req.user.id || req.user._id;
     if (!userId) {
@@ -438,6 +414,39 @@ const getUserCases = async (req, res) => {
       success: false,
       message: error.message || 'Server error while fetching your cases.',
     });
+  }
+};
+
+// @desc    Delete a case owned by the logged-in user
+// @route   DELETE /api/cases/:id
+// @access  Protected
+const deleteUserCase = async (req, res) => {
+  try {
+    console.log('Delete Request for Case ID:', req.params.id);
+    const caseId = req.params.id;
+    if (!caseId) {
+      return res.status(400).json({ success: false, message: 'Case id is required.' });
+    }
+
+    const legalCase = await LegalCase.findById(caseId).select('createdBy').lean();
+    if (!legalCase) {
+      return res.status(404).json({ success: false, message: 'Case not found.' });
+    }
+
+    // Ownership guard: a user may only delete their own case.
+    const requesterId = String(req.user.id || req.user._id || '');
+    const ownerId = String(legalCase.createdBy?._id || legalCase.createdBy || '');
+    if (!requesterId || !ownerId || requesterId !== ownerId) {
+      return res.status(403).json({ success: false, message: 'You can only delete your own cases.' });
+    }
+
+    await LegalCase.findByIdAndDelete(caseId);
+    console.log('Case deleted:', caseId, 'by user:', requesterId);
+
+    return res.status(200).json({ success: true, message: 'Case deleted successfully' });
+  } catch (error) {
+    console.error('Delete case error:', error?.message || String(error));
+    return res.status(500).json({ success: false, message: error?.message || 'Server error while deleting the case.' });
   }
 };
 
@@ -534,4 +543,5 @@ module.exports = {
   createWorkspaceCase,
   getUserCases,
   getCaseById,
+  deleteUserCase,
 };

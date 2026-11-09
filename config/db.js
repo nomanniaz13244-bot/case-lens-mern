@@ -1,47 +1,32 @@
 const mongoose = require('mongoose');
-const { MongoMemoryServer } = require('mongodb-memory-server');
 
-// ─── In-Memory MongoDB (no internet, no Atlas, no local install) ───────────────
-// Starts a throwaway MongoDB instance inside the Node process, connects to it,
-// and logs the ephemeral URI. The database is wiped on every server restart.
+// ─── MongoDB Atlas (real MVP database — no more in-memory server) ─────────────
+// Connects to MONGO_URI from backend .env with a 10-second server-selection
+// timeout so slow internet / no WiFi fails fast with a clear message.
 let memoryServer = null;
 
 const connectDB = async () => {
+  mongoose.set('strictQuery', true);
+
+  const uri = process.env.MONGO_URI;
+  if (!uri) {
+    console.error(
+      '\x1b[31m❌ MONGO_URI is missing from .env. Add: MONGO_URI=mongodb+srv://<user>:<pass>@cluster... \x1b[0m'
+    );
+    process.exit(1);
+  }
+
   try {
-    console.log('🔄 Starting In-Memory MongoDB...');
-
-    // Optional: reuse a data directory via MMS_DATA_DIR so data survives restarts.
-    memoryServer = await MongoMemoryServer.create({
-      instance: {
-        // dbName keeps data namespaced even across ephemeral instances.
-        dbName: 'case_lens_ai',
-        port: process.env.MMS_PORT ? Number(process.env.MMS_PORT) : undefined,
-        ip: process.env.MMS_IP || '127.0.0.1',
-      },
+    console.log('🔄 Connecting to MongoDB Atlas...');
+    await mongoose.connect(uri, {
+      serverSelectionTimeoutMS: 10000, // 10-second timeout — fail fast, don't hang
     });
-
-    const uri = memoryServer.getUri();
-    await mongoose.connect(uri);
-
-    console.log('✅ In-Memory MongoDB Connected');
-    console.log(`✅ Connection URI: ${uri} (ephemeral — wiped on restart)`);
-
-    // Optional auto-seed so the demo has data on first boot: set SEED_ON_START=1
-    // and have a seed routine registered (server.js exposes GET /api/seed).
-    if (process.env.SEED_ON_START === '1') {
-      try {
-        const { seedCases } = require('../controllers/searchController');
-        await seedCases({ silent: true }, { status: () => ({ json: () => {} }) });
-        console.log('🌱 Auto-seed completed.');
-      } catch (seedError) {
-        console.warn(`⚠️ Auto-seed skipped: ${seedError.message}`);
-      }
-    }
+    console.log('\x1b[32m✅ MongoDB Atlas Connected successfully!\x1b[0m');
   } catch (error) {
-    console.error(`❌ In-Memory MongoDB Error: ${error.message}`);
-    // Common cause: the mongod binary is still downloading on first run —
-    // it is cached in ./node_modules/.cache/mongodb-memory-server afterwards.
-    // Retry by simply running the backend again.
+    console.error(
+      '\x1b[31m❌ Atlas Connection Failed. Please check your internet or Mobile Hotspot.\x1b[0m'
+    );
+    console.error(`   Details: ${error.message}`);
     process.exit(1);
   }
 };
@@ -50,12 +35,7 @@ const connectDB = async () => {
 const stopDB = async () => {
   try {
     await mongoose.connection.close();
-  } catch (_) {
-    /* ignore */
-  }
-  try {
-    if (memoryServer) await memoryServer.stop();
-    console.log('🛑 In-Memory MongoDB stopped.');
+    console.log('🛑 MongoDB connection closed.');
   } catch (_) {
     /* ignore */
   }

@@ -10,9 +10,8 @@ const LegalCaseSchema = new mongoose.Schema(
 
     citation: {
       type: String,
-      required: [true, 'Citation is required'],
       trim: true,
-      unique: true,
+      default: '',
     },
 
     courtName: {
@@ -47,6 +46,11 @@ const LegalCaseSchema = new mongoose.Schema(
       type: String,
       default: '',
       trim: true,
+    },
+
+    // Date of the court's decision (separate from the DB record timestamps)
+    judgmentDate: {
+      type: Date,
     },
 
     keywords: {

@@ -3,8 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
 
 const API_BASE_URL = '/api/workspace';
-// Backend "simple case chat": one DB read + one Groq call, no RAG.
-const AI_API_URL = '/api/ai/simple-case-chat';
+// Real backend AI: fetches the case from MongoDB, grounds the prompt, calls Groq.
+const AI_API_URL = '/api/ai/case-chat';
 
 const getAuthToken = () =>
   localStorage.getItem('case_lens_token') || localStorage.getItem('token');
@@ -41,6 +41,7 @@ export default function CaseDetail() {
       .get(`${API_BASE_URL}/case/${caseId}`, { headers: authHeaders() })
       .then((response) => {
         if (alive && response.data?.success && response.data?.data) {
+          console.log('Case Data from DB:', response.data.data);
           setCaseData(response.data.data);
         }
       })
@@ -48,7 +49,7 @@ export default function CaseDetail() {
     return () => { alive = false; };
   }, [caseId]);
 
-  // ── Chat state: controlled input + message history (dummy AI, no backend) ──
+  // ── Chat state: controlled input + message history (real backend AI) ──
   const [chatInput, setChatInput] = useState('');
   const [chatHistory, setChatHistory] = useState([
     { role: 'ai', text: 'Hello! I have analyzed this case. What would you like to know?' },
@@ -61,6 +62,18 @@ export default function CaseDetail() {
     const el = chatScrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [chatHistory, aiTyping]);
+
+  // DEBUG: when the active tab renders no data, dump the whole case object so
+  // we can see exactly what MongoDB returned (field names + values).
+  useEffect(() => {
+    if (!caseData) return;
+    const current = tabContent[activeTab];
+    if (!current) return;
+    const isEmpty = current.items ? current.items.length === 0 : !String(current.text || '').trim();
+    if (isEmpty) {
+      console.log(`Current Case Data (tab "${activeTab}" is empty):`, caseData);
+    }
+  }, [activeTab, caseData]);
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
@@ -94,70 +107,100 @@ export default function CaseDetail() {
     }
   };
 
-  // ── Center-panel mock content per tab (no API, no libraries) ──
+  // ── Field access — always show exactly what the database returns ──
+  const textOf = (value) => {
+    if (value == null) return '';
+    if (Array.isArray(value)) return value.filter(Boolean).map((item) => String(item).trim()).filter(Boolean).join('\n');
+    return String(value).trim();
+  };
+  const listItems = (value) => {
+    if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
+    const asString = textOf(value);
+    if (asString.includes('\n')) return asString.split('\n').map((item) => item.trim()).filter(Boolean);
+    return asString ? [asString] : [];
+  };
+  const lawsText = () =>
+    textOf(asList(caseData?.lawsApplied).join(', ')) ||
+    textOf(asList(caseData?.legalLaws).join(', ')) ||
+    textOf(caseData?.caseLaws) ||
+    '';
+
+  // ── Center-panel content per tab (raw values straight from the database) ──
   const tabContent = {
     'My Cases': {
       title: 'My Cases',
-      text: 'State vs. Ahmed Khan and one other matter are currently open in your workspace. Open a case to continue its analysis. (Demo data)',
+      text: caseData
+        ? `${caseData.caseTitle} is open in your workspace. Use the mind map and the assistant panel to analyze it.`
+        : 'Case data is loading from the database…',
     },
     'Facts': {
       title: 'Facts & Timeline',
-      text: 'FIR lodged on May 15, 2023. Forensic reports did not match the weapon. Witnesses gave contradictory statements across three separate hearings. (Demo data)',
+      text: textOf(caseData?.facts),
     },
     'Legal Issues': {
       title: 'Legal Issues',
-      text: '1. Whether the forensic mismatch undermines the recovery evidence.\n2. Whether contradictory witness statements weaken the prosecution case.\n3. Whether the delayed trial justifies bail under Section 497 CrPC. (Demo data)',
+      items: listItems(caseData?.legalIssues),
     },
-    'Laws & Case Law': {
-      title: 'Laws & Case Law',
-      text: 'Section 497 CrPC governs bail in the Special Court; Article 10-A guarantees a fair trial within a reasonable time. Both provisions anchor the release order. (Demo data)',
-    },
+    'Laws & Case Law': (() => {
+      // Backend saves lawsApplied directly from the AI analysis.
+      const value = caseData?.lawsApplied || caseData?.legalLaws || caseData?.caseLaws;
+      if (Array.isArray(value)) {
+        return { title: 'Laws & Case Law', items: value.map((item) => String(item).trim()).filter(Boolean) };
+      }
+      return { title: 'Laws & Case Law', text: textOf(value) };
+    })(),
     'Precedent Comparison': {
       title: 'Precedent Comparison',
-      text: 'Similar bail cases show weak evidence leads to bail. This record mirrors the matched precedents where forensic inconsistency outweighed the recovery argument. (Demo data)',
+      text: textOf(caseData?.precedentComparison || caseData?.precedenceComparison),
     },
     'Supporting/Contradicting': {
       title: 'Supporting/Contradicting',
-      text: 'Supporting: unmatched forensic report and witness contradictions favor the accused. Contradicting: the alleged weapon was recovered from the accused’s residence. (Demo data)',
+      text: textOf(caseData?.supportingContradicting),
     },
     'Opposing Arguments': {
       title: 'Opposing Arguments',
-      text: 'Prosecution argued the severity of the crime and the risk of evidence tampering, maintaining that witness contradictions were memory lapses rather than fabrication. (Demo data)',
+      text: textOf(caseData?.opposingArguments),
     },
   };
 
-  // ── Pop-up content for the 6 mind-map nodes ──
-  const mockData = {
-    summary: { key: 'summary', title: 'Case Title & Summary', content: 'State vs. Ahmed Khan — The Supreme Court upheld the bail granted to the accused due to weak evidence and delayed trial.' },
-    facts: { key: 'facts', title: 'Facts & Timeline', content: 'FIR lodged on May 15, 2023. Forensic reports did not match the weapon. Witnesses gave contradictory statements across three separate hearings.' },
-    caseLaws: { key: 'caseLaws', title: 'Case Laws', content: 'Section 497 CrPC governs bail in the Special Court; Article 10-A guarantees a fair trial within a reasonable time. Both provisions anchor the release order.' },
-    precedent: { key: 'precedent', title: 'Precedent Comparison', content: 'Similar bail cases show weak evidence leads to bail. This record mirrors the matched precedents where forensic inconsistency outweighed the recovery argument.' },
-    supporting: { key: 'supporting', title: 'Supporting/Contradicting', content: 'Supporting: unmatched forensic report and witness contradictions favor the accused. Contradicting: the alleged weapon was recovered from the accused’s residence.' },
-    opposing: { key: 'opposing', title: 'Opposing Arguments', content: 'Prosecution argued the severity of the crime and the risk of evidence tampering, maintaining that witness contradictions were memory lapses rather than fabrication.' },
-    strengths: { key: 'strengths', title: 'Strengths & Weaknesses', content: 'Strengths: contradictory statements from key witnesses and the forensic mismatch. Weaknesses: no independent character witnesses on file for the accused.' },
+  // ── Pop-up content for the 6 mind-map nodes (raw database values) ──
+  const nodeTitles = {
+    facts: 'Facts & Timeline',
+    caseLaws: 'Case Laws',
+    precedent: 'Precedent Comparison',
+    supporting: 'Supporting/Contradicting',
+    opposing: 'Opposing Arguments',
+    strengths: 'Strengths & Weaknesses',
   };
 
-  // ── Pop-up content for the 6 mind-map nodes (real data → mock fallback) ──
-  const modalContentFor = (node) => {
-    const fallback = mockData[node.key];
-    switch (node.key) {
-      case 'summary':
-        return { ...fallback, content: caseData ? `${caseData.caseTitle} — ${caseData.summary || 'No summary available.'}` : fallback.content };
+  const nodeValue = (key) => {
+    switch (key) {
       case 'facts':
-        return { ...fallback, content: caseData?.facts || fallback.content };
+        return caseData?.facts;
       case 'caseLaws':
-        return { ...fallback, content: (asList(caseData?.legalLaws).join('; ') || caseData?.caseLaws) ? (asList(caseData?.legalLaws).join('; ') || caseData?.caseLaws) : fallback.content };
+        return lawsText();
       case 'precedent':
-        return { ...fallback, content: caseData?.precedentComparison || caseData?.precedenceComparison || fallback.content };
+        return caseData?.precedentComparison || caseData?.precedenceComparison;
       case 'supporting':
-        return { ...fallback, content: caseData?.supportingContradicting || fallback.content };
+        return caseData?.supportingContradicting;
       case 'opposing':
-        return { ...fallback, content: caseData?.opposingArguments || fallback.content };
+        return caseData?.opposingArguments;
       case 'strengths':
-        return { ...fallback, content: caseData?.strengthsWeaknesses || fallback.content };
+        return caseData?.strengthsWeaknesses;
       default:
-        return fallback;
+        return null;
     }
+  };
+
+  const modalContentFor = (node) => {
+    const title = nodeTitles[node.key];
+    let content = textOf(nodeValue(node.key));
+    if (node.key === 'summary') {
+      content = caseData
+        ? `${caseData.caseTitle} — ${textOf(caseData.summary)}`
+        : 'Case data is loading from the database…';
+    }
+    return { key: node.key, title, content };
   };
 
   // The 6 surrounding nodes: label, data key, position styling.
@@ -263,7 +306,17 @@ export default function CaseDetail() {
               <p className="mb-1 text-xs font-bold uppercase tracking-widest text-gray-500">Case Workspace</p>
               <h2 className="mb-6 text-2xl font-bold text-gray-900">{active.title}</h2>
               <div className="rounded-lg border border-gray-300 bg-gray-50 p-6">
-                <p className="whitespace-pre-wrap text-sm leading-7 text-gray-700">{active.text}</p>
+                {active.items ? (
+                  active.items.length ? (
+                    <ul className="list-disc space-y-2 pl-5 text-sm leading-7 text-gray-700">
+                      {active.items.map((item, index) => (
+                        <li key={index}>{item}</li>
+                      ))}
+                    </ul>
+                  ) : null
+                ) : (
+                  <p className="whitespace-pre-wrap text-sm leading-7 text-gray-700">{active.text}</p>
+                )}
               </div>
             </main>
           )}

@@ -99,7 +99,7 @@ function Register() {
           <div className="absolute -bottom-24 -left-20 w-48 h-48 bg-white rounded-full blur-3xl pointer-events-none" />
 
           {error && (
-            <div className="mb-5 p-3.5 rounded-xl  border   text-sm flex items-start gap-2.5 animate-fadeIn">
+            <div className="mb-5 p-3.5 rounded-xl border border-red-300 bg-red-50 text-red-700 text-sm flex items-start gap-2.5 animate-fadeIn">
               <span className="text-base leading-none">⚠️</span>
               <span className="flex-1 leading-snug">{error}</span>
             </div>

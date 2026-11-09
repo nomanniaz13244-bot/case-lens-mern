@@ -1,21 +1,7 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const { DEMO_BYPASS, buildDemoUser } = require('../config/demoBypass');
 
 const protect = async (req, res, next) => {
-  // ⚠️ DEMO BYPASS: accept ANY bearer token and attach the demo identity.
-  // No DB lookup, no JWT verification — the UI must work with the database down.
-  if (DEMO_BYPASS) {
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      req.user = buildDemoUser();
-      return next();
-    }
-    return res.status(401).json({
-      success: false,
-      message: 'Not authorized, no token provided (Demo Bypass)',
-    });
-  }
-
   let token;
 
   if (
