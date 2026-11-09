@@ -226,8 +226,18 @@ const parseAnalysisJson = (content) => {
 // @access  Protected
 const createWorkspaceCase = async (req, res) => {
   try {
-    let sourceText = String(req.body?.text || req.body?.fullText || '').trim();
+    // New contract: { caseTitle, caseText } sent separately. `text`/`fullText`
+    // remain accepted aliases for older clients.
+    let sourceText = String(
+      req.body?.caseText || req.body?.text || req.body?.fullText || ''
+    ).trim();
     if (req.file) sourceText = (await extractDocumentText(req.file)).trim();
+
+    const caseTitle = String(req.body?.caseTitle || req.body?.title || '').trim();
+    // A workspace case without a title breaks list display/search — required.
+    if (!caseTitle) {
+      return res.status(400).json({ success: false, message: 'Case title is required.' });
+    }
 
     if (!sourceText) {
       return res.status(400).json({ success: false, message: 'Provide legal text or upload a PDF/image file.' });
@@ -323,8 +333,6 @@ const createWorkspaceCase = async (req, res) => {
       verdict: item.verdict,
     }));
 
-    const titleSource = String(req.body?.caseTitle || '').trim();
-    const caseTitle = titleSource || sourceText.split(/\n/).map((line) => line.trim()).find(Boolean)?.slice(0, 180) || 'AI Workspace Case';
     const newCase = await LegalCase.create({
       caseTitle,
       citation,

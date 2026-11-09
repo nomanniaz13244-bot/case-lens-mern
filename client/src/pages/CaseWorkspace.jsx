@@ -10,14 +10,17 @@ export default function CaseWorkspace() {
   const { token } = useAuth();
   const fileInputRef = useRef(null);
   const [inputType, setInputType] = useState('text');
+  const [caseTitle, setCaseTitle] = useState('');
   const [text, setText] = useState('');
   const [document, setDocument] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({ title: '', description: '' });
 
   const switchInput = (type) => {
     setInputType(type);
     setError('');
+    setFieldErrors({ title: '', description: '' });
     if (type === 'text') {
       setDocument(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -30,18 +33,27 @@ export default function CaseWorkspace() {
     event.preventDefault();
     setError('');
 
-    if (inputType === 'text' && !text.trim()) {
-      setError('Please enter legal case text.');
-      return;
-    }
-    if (inputType === 'document' && !document) {
-      setError('Please select a PDF or image document.');
+    const titleMissing = !caseTitle.trim();
+    const descriptionMissing = inputType === 'text' && !text.trim();
+    const documentMissing = inputType === 'document' && !document;
+
+    if (titleMissing || descriptionMissing || documentMissing) {
+      setFieldErrors({
+        title: titleMissing ? 'Title is required' : '',
+        description: descriptionMissing ? 'Case description is required' : '',
+      });
       return;
     }
 
     const payload = new FormData();
-    if (inputType === 'text') payload.append('text', text.trim());
-    else payload.append('file', document);
+    payload.append('caseTitle', caseTitle.trim());
+    if (inputType === 'text') {
+      // `caseText` is the new contract; `text` kept for API compatibility.
+      payload.append('caseText', text.trim());
+      payload.append('text', text.trim());
+    } else {
+      payload.append('file', document);
+    }
 
     const authToken =
       token ||
@@ -104,11 +116,53 @@ export default function CaseWorkspace() {
             </div>
           </fieldset>
 
+          {/* ── Section 1: Case Title ─────────────────────────────────────── */}
+          <div>
+            <label htmlFor="workspace-case-title" className="mb-2 block text-sm font-semibold text-[#1A1A1A]">
+              Case Title
+            </label>
+            <input
+              id="workspace-case-title"
+              type="text"
+              value={caseTitle}
+              onChange={(event) => {
+                setCaseTitle(event.target.value);
+                if (fieldErrors.title) {
+                  setFieldErrors((current) => ({ ...current, title: '' }));
+                }
+              }}
+              placeholder="State vs. Imran"
+              className={`w-full rounded-2xl border bg-white px-4 py-3 text-sm text-[#1A1A1A] outline-none placeholder:text-gray-400 focus:border-[#000000] focus:ring-1 focus:ring-[#000000] ${
+                fieldErrors.title ? 'border-red-400' : 'border-gray-300'
+              }`}
+            />
+            {fieldErrors.title && (
+              <p className="mt-1.5 text-xs font-semibold text-red-600">{fieldErrors.title}</p>
+            )}
+          </div>
+
           <div className="mt-7">
             {inputType === 'text' ? (
               <div>
-                <label htmlFor="workspace-case-text" className="mb-2 block text-sm font-semibold text-[#1A1A1A]">Legal case text</label>
-                <textarea id="workspace-case-text" rows={12} value={text} onChange={(event) => setText(event.target.value)} placeholder="Paste the legal judgment or case details here…" className="w-full resize-y rounded-2xl border border-gray-300 bg-white px-4 py-3 text-sm leading-6 text-[#1A1A1A] outline-none placeholder:text-gray-400 focus:border-[#000000] focus:ring-1 focus:ring-[#000000]" />
+                <label htmlFor="workspace-case-text" className="mb-2 block text-sm font-semibold text-[#1A1A1A]">Case Description / Facts</label>
+                <textarea
+                  id="workspace-case-text"
+                  rows={12}
+                  value={text}
+                  onChange={(event) => {
+                    setText(event.target.value);
+                    if (fieldErrors.description) {
+                      setFieldErrors((current) => ({ ...current, description: '' }));
+                    }
+                  }}
+                  placeholder="Paste the full case details, FIR text, or judgment here…"
+                  className={`w-full resize-y rounded-2xl border bg-white px-4 py-3 text-sm leading-6 text-[#1A1A1A] outline-none placeholder:text-gray-400 focus:border-[#000000] focus:ring-1 focus:ring-[#000000] ${
+                    fieldErrors.description ? 'border-red-400' : 'border-gray-300'
+                  }`}
+                />
+                {fieldErrors.description && (
+                  <p className="mt-1.5 text-xs font-semibold text-red-600">{fieldErrors.description}</p>
+                )}
               </div>
             ) : (
               <div>
@@ -120,7 +174,11 @@ export default function CaseWorkspace() {
 
           {error && <div className="mt-5 rounded-xl border border-gray-300 bg-[#F5F5F5] px-4 py-3 text-sm text-black">{error}</div>}
 
-          <button type="submit" disabled={loading} className="mt-6 flex w-full items-center justify-center gap-3 rounded-xl bg-[#000000] px-5 py-3.5 text-sm font-bold text-white shadow-sm transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto">
+          <button
+            type="submit"
+            disabled={loading || !caseTitle.trim() || (inputType === 'text' ? !text.trim() : !document)}
+            className="mt-6 flex w-full items-center justify-center gap-3 rounded-xl bg-[#000000] px-5 py-3.5 text-sm font-bold text-white shadow-sm transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+          >
             {loading && <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" aria-hidden="true" />}
             {loading ? 'Analyzing case…' : 'Create Case Workspace'}
           </button>
