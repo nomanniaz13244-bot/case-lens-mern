@@ -8,9 +8,7 @@ import {
   FolderPlus,
   Gavel,
   LayoutDashboard,
-  Scale,
   Search,
-  Swords,
 } from 'lucide-react';
 
 const groups = [
@@ -23,8 +21,6 @@ const groups = [
     { to: '/research', label: 'Legal Research', icon: Search },
     { to: '/ai-chat', label: 'Legal AI Assistant', icon: Bot },
     { to: '/laws', label: 'Case Laws', icon: Gavel },
-    { to: '/analysis', label: 'Judgment Analysis', icon: Scale },
-    { to: '/opposition', label: 'Opposition & Weakness', icon: Swords },
   ]},
   { title: 'DRAFTING & REFERENCE', links: [
     { to: '/drafting', label: 'Legal Drafting', icon: FilePenLine },
