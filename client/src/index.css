@@ -47,3 +47,45 @@ textarea,
 select {
   font-family: inherit;
 }
+
+/* Legal Dictionary — Urdu (Nastaliq) typography */
+.font-urdu {
+  font-family: 'Noto Nastaliq Urdu', 'Jameel Noori Nastaleeq', 'Noto Naskh Arabic', serif;
+}
+
+/* Legal Dictionary — side panel motion */
+@keyframes dictionary-panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes dictionary-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-dictionary-panel-in {
+  animation: dictionary-panel-in 0.22s ease-out;
+}
+
+.animate-dictionary-fade-in {
+  animation: dictionary-fade-in 0.18s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-dictionary-panel-in,
+  .animate-dictionary-fade-in {
+    animation: none;
+  }
+}
+

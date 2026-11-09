@@ -1,24 +1,20 @@
-import React, { useState, useRef } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 import {
-  FileText,
-  Download,
-  Wand2,
-  Loader2,
-  Sparkles,
-  FilePenLine,
-  ClipboardCopy,
-  Check,
-  History,
-  ChevronDown,
   AlertCircle,
-  Type,
+  Check,
+  Copy,
+  Download,
+  FilePenLine,
+  FileText,
+  History,
+  Loader2,
+  Printer,
+  Save,
+  Scale,
+  Sparkles,
+  Wand2,
 } from 'lucide-react';
-
-const API_BASE = 'http://localhost:5000/api';
-
-const getAuthToken = () =>
-  localStorage.getItem('case_lens_token') || localStorage.getItem('token');
 
 const DOCUMENT_TYPES = [
   'Legal Notice',
@@ -28,504 +24,727 @@ const DOCUMENT_TYPES = [
   'Basic Agreement',
 ];
 
-export default function LegalDrafting() {
-  // ── Form state ──
-  const [documentType, setDocumentType] = useState('');
-  const [instructions, setInstructions] = useState('');
+const MAX_INSTRUCTIONS_LENGTH = 8000;
+const MAX_DRAFT_LENGTH = 30000;
 
-  // ── Draft state ──
-  const [draftContent, setDraftContent] = useState('');
-  const [generating, setGenerating] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [error, setError] = useState('');
-  const [copied, setCopied] = useState(false);
+const AI_INSTRUCTIONS = {
+  improve:
+    'Make this draft more formal, precise, and persuasive in the style of a senior Pakistani advocate. Strengthen the legal language and structure without changing any facts, names, dates, amounts, statutory references, or bracketed placeholders.',
+  simplify:
+    'Simplify the English of this draft into clear, plain legal English that a lay client can understand, while preserving every fact, legal right, statutory reference, bracketed placeholder, and the overall Pakistani legal format.',
+};
+
+// ─── Small helpers ────────────────────────────────────────────────────────────
+
+const escapeHtml = (value) =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const slugify = (value) =>
+  String(value || 'legal-draft')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'legal-draft';
+
+const todayStamp = () => new Date().toISOString().slice(0, 10);
+
+const formatDate = (value) => {
+  if (!value) return '';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? ''
+    : date.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+const countWords = (value) => {
+  const trimmed = String(value || '').trim();
+  return trimmed ? trimmed.split(/\s+/).length : 0;
+};
+
+const triggerFileDownload = (blob, filename) => {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+};
+
+const buildPrintDocument = (title, content) => `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>${escapeHtml(title)}</title>
+    <style>
+      @page { size: A4; margin: 1in; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        color: #111111;
+        background: #ffffff;
+        font-family: "Times New Roman", Times, serif;
+        font-size: 12pt;
+        line-height: 1.65;
+      }
+      .draft {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="draft">${escapeHtml(content)}</div>
+  </body>
+</html>`;
+
+const buildWordDocument = (title, content) => `<!doctype html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office"
+      xmlns:w="urn:schemas-microsoft-com:office:word"
+      xmlns="http://www.w3.org/TR/REC-html40">
+  <head>
+    <meta charset="utf-8" />
+    <title>${escapeHtml(title)}</title>
+    <!--[if gte mso 9]>
+    <xml>
+      <w:WordDocument>
+        <w:View>Print</w:View>
+        <w:Zoom>100</w:Zoom>
+      </w:WordDocument>
+    </xml>
+    <![endif]-->
+    <style>
+      @page { size: A4; margin: 1in; }
+      body {
+        font-family: "Times New Roman", Times, serif;
+        font-size: 12pt;
+        line-height: 1.65;
+        color: #111111;
+      }
+      p { margin: 0 0 8pt 0; }
+    </style>
+  </head>
+  <body>
+    <div>${escapeHtml(content).replace(/\r?\n/g, '<br />')}</div>
+  </body>
+</html>`;
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export default function LegalDrafting() {
+  const [documentType, setDocumentType] = useState(DOCUMENT_TYPES[0]);
+  const [instructions, setInstructions] = useState('');
+  const [content, setContent] = useState('');
+  const [lastSavedContent, setLastSavedContent] = useState('');
   const [draftId, setDraftId] = useState(null);
 
-  // ── Saved drafts ──
-  const [savedDrafts, setSavedDrafts] = useState([]);
-  const [showDrafts, setShowDrafts] = useState(false);
-  const [loadingDrafts, setLoadingDrafts] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [editAction, setEditAction] = useState('');
+  const [saving, setSaving] = useState(false);
 
-  const textareaRef = useRef(null);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [copied, setCopied] = useState(false);
 
-  // ── Generate Draft ──
-  const handleGenerate = async (e) => {
-    e.preventDefault();
-    if (!documentType || !instructions.trim()) return;
-    setGenerating(true);
-    setError('');
-    setDraftContent('');
-    setDraftId(null);
+  const [drafts, setDrafts] = useState([]);
+  const [loadingDrafts, setLoadingDrafts] = useState(true);
+
+  const isDirty = Boolean(content) && content !== lastSavedContent;
+  const busy = generating || Boolean(editAction) || saving;
+
+  const fetchDrafts = useCallback(async () => {
+    setLoadingDrafts(true);
     try {
-      const token = getAuthToken();
-      const res = await axios.post(
-        `${API_BASE}/drafting/generate`,
-        { documentType, instructions: instructions.trim() },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          timeout: 120000,
-        }
+      const response = await axios.get('/api/drafting', { timeout: 20000 });
+      setDrafts(response.data?.data || []);
+    } catch (requestError) {
+      // Do not shout on the initial background load; the form still works.
+      if (requestError.response?.status !== 401) {
+        setError(requestError.response?.data?.message || 'Unable to load saved drafts.');
+      }
+    } finally {
+      setLoadingDrafts(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDrafts();
+  }, [fetchDrafts]);
+
+  const resetMessages = () => {
+    setError('');
+    setNotice('');
+    setCopied(false);
+  };
+
+  const handleGenerate = async () => {
+    const trimmedInstructions = instructions.trim();
+
+    if (!trimmedInstructions) {
+      setNotice('');
+      setError('Please describe the case facts or drafting instructions first.');
+      return;
+    }
+
+    resetMessages();
+    setGenerating(true);
+
+    try {
+      const response = await axios.post(
+        '/api/drafting/generate',
+        { documentType, instructions: trimmedInstructions },
+        { timeout: 120000 }
       );
-      setDraftContent(res.data?.data?.generatedContent || '');
-      setDraftId(res.data?.data?.draftId || null);
-    } catch (err) {
+
+      const draft = response.data?.data;
+      const generatedContent =
+        draft?.generatedContent || response.data?.generatedContent || '';
+
+      if (!String(generatedContent).trim()) {
+        throw new Error('The AI service returned an empty draft. Please try again.');
+      }
+
+      setContent(generatedContent);
+      setLastSavedContent(generatedContent);
+      setDraftId(draft?._id || null);
+      setNotice('Draft generated and saved to your account.');
+      fetchDrafts();
+    } catch (requestError) {
       setError(
-        err.response?.data?.message ||
-          'Failed to generate draft. Make sure the backend is running.'
+        requestError.response?.data?.message ||
+          requestError.message ||
+          'Unable to generate the draft. Please try again.'
       );
     } finally {
       setGenerating(false);
     }
   };
 
-  // ── AI Edit (Improve / Simplify / Custom) ──
-  const handleAIEdit = async (instruction) => {
-    if (!draftContent.trim() || editing) return;
-    setEditing(true);
-    setError('');
-    try {
-      const token = getAuthToken();
-      const res = await axios.post(
-        `${API_BASE}/drafting/edit`,
-        { text: draftContent, instruction },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          timeout: 120000,
-        }
-      );
-      setDraftContent(res.data?.data?.editedContent || draftContent);
-    } catch (err) {
-      setError(
-        err.response?.data?.message || 'Failed to edit draft with AI.'
-      );
-    } finally {
-      setEditing(false);
-    }
-  };
-
-  // ── Copy to clipboard ──
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(draftContent);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Fallback
-      const ta = document.createElement('textarea');
-      ta.value = draftContent;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  // ── Download as PDF (window.print) ──
-  const handleDownloadPDF = () => {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>${documentType || 'Legal Draft'} - Case Lens</title>
-        <style>
-          body {
-            font-family: 'Times New Roman', Times, serif;
-            font-size: 13pt;
-            line-height: 1.8;
-            margin: 1in;
-            color: #000;
-          }
-          h1, h2, h3 { font-family: 'Times New Roman', Times, serif; }
-          pre { white-space: pre-wrap; word-wrap: break-word; font-family: 'Times New Roman', Times, serif; font-size: 13pt; line-height: 1.8; }
-          @media print {
-            body { margin: 0.75in; }
-          }
-        </style>
-      </head>
-      <body>
-        <pre>${draftContent.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>
-      </body>
-      </html>
-    `);
-    printWindow.document.close();
-    printWindow.focus();
-    setTimeout(() => {
-      printWindow.print();
-    }, 400);
-  };
-
-  // ── Download as Word (.doc) ──
-  const handleDownloadWord = () => {
-    const header =
-      '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">' +
-      '<head><meta charset="utf-8"><title>Legal Draft</title>' +
-      '<style>body{font-family:"Times New Roman",Times,serif;font-size:13pt;line-height:1.8;margin:1in;}pre{white-space:pre-wrap;word-wrap:break-word;font-family:"Times New Roman",Times,serif;font-size:13pt;line-height:1.8;}</style></head><body>';
-    const footer = '</body></html>';
-    const content = `<pre>${draftContent.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`;
-    const blob = new Blob([header + content + footer], {
-      type: 'application/msword',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${(documentType || 'Legal_Draft').replace(/\s+/g, '_')}_${Date.now()}.doc`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  // ── Load saved drafts ──
-  const handleLoadDrafts = async () => {
-    if (showDrafts) {
-      setShowDrafts(false);
+  const handleAiEdit = async (mode) => {
+    if (!content.trim()) {
+      setError('Generate a draft (or paste text into the editor) before using AI editing.');
       return;
     }
-    setLoadingDrafts(true);
+
+    resetMessages();
+    setEditAction(mode);
+
     try {
-      const token = getAuthToken();
-      const res = await axios.get(`${API_BASE}/drafting/my-drafts`, {
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      const response = await axios.post(
+        '/api/drafting/edit',
+        {
+          text: content,
+          instruction: AI_INSTRUCTIONS[mode],
+          draftId,
+          documentType,
+          instructions: instructions.trim(),
         },
-        timeout: 15000,
-      });
-      setSavedDrafts(res.data?.data || []);
-      setShowDrafts(true);
-    } catch {
-      setError('Failed to load saved drafts.');
+        { timeout: 120000 }
+      );
+
+      const draft = response.data?.data;
+      const revisedContent =
+        draft?.generatedContent || response.data?.generatedContent || '';
+
+      if (!String(revisedContent).trim()) {
+        throw new Error('The AI service returned an empty revision. Please try again.');
+      }
+
+      setContent(revisedContent);
+      setLastSavedContent(revisedContent);
+      setDraftId(draft?._id || draftId);
+      setNotice(
+        mode === 'improve'
+          ? 'Draft improved and saved.'
+          : 'Draft simplified and saved.'
+      );
+      fetchDrafts();
+    } catch (requestError) {
+      setError(
+        requestError.response?.data?.message ||
+          requestError.message ||
+          'Unable to edit the draft. Please try again.'
+      );
     } finally {
-      setLoadingDrafts(false);
+      setEditAction('');
     }
   };
 
-  const loadDraft = (draft) => {
-    setDocumentType(draft.documentType || '');
-    setInstructions(draft.instructions || '');
-    setDraftContent(draft.generatedContent || '');
-    setDraftId(draft._id || null);
-    setShowDrafts(false);
+  const handleSave = async () => {
+    if (!content.trim()) {
+      setError('There is nothing to save.');
+      return;
+    }
+
+    if (!draftId) {
+      setError('Generate a draft first so it can be saved to your account.');
+      return;
+    }
+
+    resetMessages();
+    setSaving(true);
+
+    try {
+      await axios.put(
+        `/api/drafting/${draftId}`,
+        { generatedContent: content },
+        { timeout: 30000 }
+      );
+      setLastSavedContent(content);
+      setNotice('Changes saved to your account.');
+      fetchDrafts();
+    } catch (requestError) {
+      setError(
+        requestError.response?.data?.message ||
+          requestError.message ||
+          'Unable to save your changes.'
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const hasDraft = draftContent.trim().length > 0;
+  const handleLoadDraft = (draft) => {
+    resetMessages();
+    setDocumentType(
+      DOCUMENT_TYPES.includes(draft.documentType) ? draft.documentType : DOCUMENT_TYPES[0]
+    );
+    setInstructions(draft.instructions || '');
+    setContent(draft.generatedContent || '');
+    setLastSavedContent(draft.generatedContent || '');
+    setDraftId(draft._id || null);
+    setNotice('Saved draft loaded into the editor.');
+  };
+
+  const handleNewDraft = () => {
+    resetMessages();
+    setDocumentType(DOCUMENT_TYPES[0]);
+    setInstructions('');
+    setContent('');
+    setLastSavedContent('');
+    setDraftId(null);
+  };
+
+  const handleClear = () => {
+    resetMessages();
+    setContent('');
+    setLastSavedContent('');
+    setDraftId(null);
+  };
+
+  const handleCopy = async () => {
+    if (!content.trim()) return;
+
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError('Could not access the clipboard. Please copy the text manually.');
+    }
+  };
+
+  const handleDownloadPdf = () => {
+    if (!content.trim()) {
+      setError('Generate a draft before downloading.');
+      return;
+    }
+
+    const title = `${documentType} — ${todayStamp()}`;
+    const printWindow = window.open('', '_blank', 'width=900,height=760');
+
+    if (!printWindow) {
+      setError('Your browser blocked the print window. Please allow pop-ups for this site.');
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(buildPrintDocument(title, content));
+    printWindow.document.close();
+    printWindow.focus();
+
+    // Let the browser paint the document before opening the print dialog.
+    window.setTimeout(() => {
+      printWindow.onafterprint = () => printWindow.close();
+      printWindow.print();
+    }, 250);
+  };
+
+  const handleDownloadWord = () => {
+    if (!content.trim()) {
+      setError('Generate a draft before downloading.');
+      return;
+    }
+
+    const title = `${documentType} — ${todayStamp()}`;
+    const filename = `${slugify(documentType)}-${todayStamp()}.doc`;
+    const blob = new Blob(['\ufeff', buildWordDocument(title, content)], {
+      type: 'application/msword;charset=utf-8',
+    });
+
+    triggerFileDownload(blob, filename);
+  };
+
+  const words = countWords(content);
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[#F5F5F5]">
-      <div className="mx-auto max-w-7xl p-6 lg:p-8">
-        {/* ── Page Header ── */}
-        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <main className="flex-1 overflow-y-auto bg-[#F5F5F5] text-[#1A1A1A]">
+      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        {/* ── Page header ─────────────────────────────────────────────────── */}
+        <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="flex items-center gap-3 text-2xl font-bold text-gray-900">
-              <FilePenLine size={26} strokeWidth={1.8} />
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-500">
+              Drafting &amp; Reference
+            </p>
+            <h1 className="mt-1 flex items-center gap-2.5 text-2xl font-bold sm:text-3xl">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-black text-white">
+                <FilePenLine size={20} strokeWidth={1.9} aria-hidden="true" />
+              </span>
               Legal Drafting
             </h1>
-            <p className="mt-1 text-sm text-gray-500">
-              AI-powered legal document drafting for Pakistani courts
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-gray-600">
+              Generate court-ready Pakistani legal drafts, refine them with AI, and export them
+              for filing or client review.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={handleLoadDrafts}
-            disabled={loadingDrafts}
-            className="flex items-center gap-2 self-start rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-gray-400 hover:shadow"
-          >
-            {loadingDrafts ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <History size={16} />
-            )}
-            My Saved Drafts
-            <ChevronDown
-              size={14}
-              className={`transition ${showDrafts ? 'rotate-180' : ''}`}
-            />
-          </button>
-        </div>
 
-        {/* ── Saved Drafts Dropdown ── */}
-        {showDrafts && (
-          <div className="mb-6 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-            <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-gray-500">
-              Saved Drafts
-            </p>
-            {savedDrafts.length === 0 ? (
-              <p className="text-sm text-gray-400">
-                No saved drafts yet. Generate your first one below.
-              </p>
-            ) : (
-              <div className="max-h-60 space-y-2 overflow-y-auto">
-                {savedDrafts.map((draft) => (
-                  <button
-                    key={draft._id}
-                    type="button"
-                    onClick={() => loadDraft(draft)}
-                    className="flex w-full items-center gap-3 rounded-xl border border-gray-200 bg-[#FAFAFA] px-4 py-3 text-left transition hover:border-gray-400 hover:shadow-sm"
-                  >
-                    <FileText size={16} className="flex-shrink-0 text-gray-400" />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-gray-800">
-                        {draft.documentType}
-                      </p>
-                      <p className="truncate text-xs text-gray-400">
-                        {draft.instructions?.slice(0, 80)}
-                        {draft.instructions?.length > 80 ? '…' : ''}
-                      </p>
-                    </div>
-                    <span className="flex-shrink-0 text-[10px] text-gray-400">
-                      {new Date(draft.createdAt).toLocaleDateString()}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── Error ── */}
-        {error && (
-          <div className="mb-5 flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            <AlertCircle size={16} className="flex-shrink-0" />
-            {error}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-[#E5E5E5] bg-white px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-600">
+              <Sparkles size={12} aria-hidden="true" />
+              AI Assisted
+            </span>
             <button
               type="button"
-              onClick={() => setError('')}
-              className="ml-auto text-xs font-semibold text-red-500 hover:text-red-700"
+              onClick={handleNewDraft}
+              className="rounded-xl border border-[#E5E5E5] bg-white px-4 py-2 text-xs font-semibold text-black transition hover:bg-[#F5F5F5]"
             >
-              Dismiss
+              New Draft
             </button>
           </div>
-        )}
+        </header>
 
-        {/* ── Main 2-Column Layout ── */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-          {/* ─── LEFT SIDEBAR: Input Form ─── */}
-          <div className="lg:col-span-4 xl:col-span-3">
-            <form
-              onSubmit={handleGenerate}
-              className="sticky top-6 space-y-5 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm"
-            >
-              <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
-                Draft Configuration
-              </p>
-
-              {/* Document Type */}
-              <div>
-                <label
-                  htmlFor="docType"
-                  className="mb-2 block text-sm font-medium text-gray-700"
-                >
-                  Document Type
-                </label>
-                <div className="relative">
-                  <select
-                    id="docType"
-                    value={documentType}
-                    onChange={(e) => setDocumentType(e.target.value)}
-                    className="w-full appearance-none rounded-xl border border-gray-300 bg-[#FAFAFA] px-4 py-3 pr-10 text-sm text-gray-800 outline-none transition focus:border-black focus:ring-1 focus:ring-black"
-                    required
-                  >
-                    <option value="" disabled>
-                      Select document type…
-                    </option>
-                    {DOCUMENT_TYPES.map((type) => (
-                      <option key={type} value={type}>
-                        {type}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown
-                    size={16}
-                    className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
-                  />
-                </div>
+        <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
+          {/* ── Left column: form + saved drafts ─────────────────────────── */}
+          <aside className="space-y-5">
+            <section className="rounded-2xl border border-[#E5E5E5] bg-white p-5 shadow-sm">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="flex items-center gap-2 text-sm font-bold">
+                  <FileText size={16} strokeWidth={1.9} aria-hidden="true" />
+                  Draft Settings
+                </h2>
+                <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-gray-400">
+                  Step 1
+                </span>
               </div>
 
-              {/* Instructions */}
-              <div>
-                <label
-                  htmlFor="instructions"
-                  className="mb-2 block text-sm font-medium text-gray-700"
-                >
-                  Case Details / Instructions
-                </label>
-                <textarea
-                  id="instructions"
-                  rows={8}
-                  value={instructions}
-                  onChange={(e) => setInstructions(e.target.value)}
-                  placeholder="Describe the facts, parties involved, dates, legal issues, and what you want the document to convey…"
-                  className="w-full resize-none rounded-xl border border-gray-300 bg-[#FAFAFA] px-4 py-3 text-sm leading-relaxed text-gray-800 placeholder-gray-400 outline-none transition focus:border-black focus:ring-1 focus:ring-black"
-                  required
-                />
-                <p className="mt-1 text-right text-[10px] text-gray-400">
-                  {instructions.length.toLocaleString()} / 10,000
-                </p>
+              <label
+                htmlFor="documentType"
+                className="mb-1.5 block text-xs font-semibold text-gray-700"
+              >
+                Document Type
+              </label>
+              <select
+                id="documentType"
+                value={documentType}
+                onChange={(event) => setDocumentType(event.target.value)}
+                disabled={generating || Boolean(editAction)}
+                className="w-full rounded-xl border border-[#E5E5E5] bg-white px-3 py-2.5 text-sm text-[#1A1A1A] outline-none transition focus:border-black focus:ring-2 focus:ring-black/5 disabled:bg-gray-50"
+              >
+                {DOCUMENT_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+
+              <label
+                htmlFor="instructions"
+                className="mb-1.5 mt-4 block text-xs font-semibold text-gray-700"
+              >
+                Case Details / Instructions
+              </label>
+              <textarea
+                id="instructions"
+                value={instructions}
+                onChange={(event) => setInstructions(event.target.value)}
+                rows={9}
+                maxLength={MAX_INSTRUCTIONS_LENGTH}
+                disabled={generating || Boolean(editAction)}
+                placeholder={`Describe the facts, parties, court, relief sought and any deadlines.\n\nExample: My client [Client Name] was issued a cheque by [Opposite Party] which was dishonoured...`}
+                className="min-h-[180px] w-full resize-y rounded-xl border border-[#E5E5E5] bg-white p-3.5 text-sm leading-relaxed text-[#1A1A1A] outline-none transition placeholder:text-gray-400 focus:border-black focus:ring-2 focus:ring-black/5"
+              />
+              <div className="mt-1.5 flex items-start justify-between gap-2 text-[10px] text-gray-400">
+                <span>Only state facts you can verify. Missing details become placeholders.</span>
+                <span className="shrink-0 tabular-nums">
+                  {instructions.length}/{MAX_INSTRUCTIONS_LENGTH}
+                </span>
               </div>
 
-              {/* Generate Button */}
               <button
-                type="submit"
-                disabled={generating || !documentType || !instructions.trim()}
-                className={`flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-sm font-semibold transition ${
-                  generating || !documentType || !instructions.trim()
-                    ? 'cursor-not-allowed bg-gray-200 text-gray-500'
-                    : 'bg-black text-white shadow-sm hover:bg-gray-800'
-                }`}
+                type="button"
+                onClick={handleGenerate}
+                disabled={generating || Boolean(editAction) || !instructions.trim()}
+                className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300"
               >
                 {generating ? (
-                  <Loader2 size={18} className="animate-spin" />
+                  <Loader2 size={17} className="animate-spin" aria-hidden="true" />
                 ) : (
-                  <Sparkles size={18} />
+                  <Wand2 size={17} aria-hidden="true" />
                 )}
-                {generating ? 'Generating Draft…' : 'Generate Draft'}
+                {generating ? 'Generating draft...' : 'Generate Draft'}
               </button>
-            </form>
-          </div>
 
-          {/* ─── RIGHT MAIN: Draft Editor ─── */}
-          <div className="lg:col-span-8 xl:col-span-9">
-            {/* Action Buttons Bar */}
-            {hasDraft && (
-              <div className="mb-4 flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    handleAIEdit(
-                      'Improve this draft: make the language more formal, authoritative, and legally precise. Strengthen the legal arguments and ensure proper legal terminology is used throughout.'
-                    )
-                  }
-                  disabled={editing}
-                  className="flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-gray-400 hover:shadow"
-                >
-                  {editing ? (
-                    <Loader2 size={15} className="animate-spin" />
-                  ) : (
-                    <Wand2 size={15} />
-                  )}
-                  Improve with AI
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    handleAIEdit(
-                      'Simplify the English in this legal draft. Use clearer, simpler language while maintaining the legal validity and formal structure. Make it easier to understand for non-lawyers.'
-                    )
-                  }
-                  disabled={editing}
-                  className="flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-gray-400 hover:shadow"
-                >
-                  {editing ? (
-                    <Loader2 size={15} className="animate-spin" />
-                  ) : (
-                    <Type size={15} />
-                  )}
-                  Simplify with AI
-                </button>
+              <p className="mt-3 flex items-start gap-1.5 text-[10px] leading-relaxed text-gray-500">
+                <Sparkles size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+                Drafts follow Pakistani legal format and keep [bracketed placeholders] wherever
+                facts are missing.
+              </p>
+            </section>
 
-                <div className="hidden sm:block sm:flex-1" />
-
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  className="flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-gray-400 hover:shadow"
-                >
-                  {copied ? (
-                    <Check size={15} className="text-green-600" />
-                  ) : (
-                    <ClipboardCopy size={15} />
-                  )}
-                  {copied ? 'Copied!' : 'Copy'}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDownloadPDF}
-                  className="flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-gray-400 hover:shadow"
-                >
-                  <Download size={15} />
-                  PDF
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDownloadWord}
-                  className="flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-gray-400 hover:shadow"
-                >
-                  <FileText size={15} />
-                  Word
-                </button>
+            <section className="overflow-hidden rounded-2xl border border-[#E5E5E5] bg-white shadow-sm">
+              <div className="flex items-center justify-between border-b border-[#E5E5E5] px-5 py-3.5">
+                <h2 className="flex items-center gap-2 text-sm font-bold">
+                  <History size={16} strokeWidth={1.9} aria-hidden="true" />
+                  Saved Drafts
+                </h2>
+                <span className="rounded-full border border-[#E5E5E5] bg-[#F5F5F5] px-2 py-0.5 text-[10px] font-bold text-gray-600">
+                  {drafts.length}
+                </span>
               </div>
-            )}
 
-            {/* Draft Editor Area */}
-            <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
-              {hasDraft ? (
-                <div className="relative">
-                  {/* Editing overlay */}
-                  {editing && (
-                    <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-white/80 backdrop-blur-[2px]">
-                      <div className="flex items-center gap-3 rounded-xl bg-black px-6 py-3 text-sm font-semibold text-white shadow-lg">
-                        <Loader2 size={18} className="animate-spin" />
-                        AI is rewriting your draft…
-                      </div>
-                    </div>
-                  )}
-                  <textarea
-                    ref={textareaRef}
-                    value={draftContent}
-                    onChange={(e) => setDraftContent(e.target.value)}
-                    className="min-h-[600px] w-full resize-y rounded-2xl border-none bg-transparent px-8 py-8 font-mono text-sm leading-7 text-gray-800 outline-none"
-                    style={{ tabSize: 4 }}
-                  />
-                </div>
-              ) : (
-                <div className="flex min-h-[500px] flex-col items-center justify-center px-6 py-16 text-center">
-                  <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-[#F5F5F5]">
-                    <FilePenLine size={28} strokeWidth={1.5} className="text-gray-400" />
+              <div className="max-h-72 overflow-y-auto p-2">
+                {loadingDrafts ? (
+                  <div className="flex items-center justify-center gap-2 px-3 py-8 text-xs text-gray-500">
+                    <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+                    Loading drafts...
                   </div>
-                  <h3 className="text-lg font-bold text-gray-800">
-                    {generating ? 'Generating your draft…' : 'No Draft Yet'}
-                  </h3>
-                  <p className="mt-2 max-w-sm text-sm text-gray-400">
-                    {generating
-                      ? 'Our AI lawyer is drafting your document. This may take a moment.'
-                      : 'Select a document type, provide your case details, and click "Generate Draft" to begin.'}
-                  </p>
-                  {generating && (
-                    <Loader2
-                      size={28}
-                      className="mt-6 animate-spin text-gray-400"
-                    />
+                ) : drafts.length === 0 ? (
+                  <div className="px-3 py-8 text-center">
+                    <FileText size={22} className="mx-auto text-gray-300" aria-hidden="true" />
+                    <p className="mt-2 text-xs font-semibold text-gray-600">No saved drafts yet</p>
+                    <p className="mt-1 text-[10px] leading-relaxed text-gray-400">
+                      Generated drafts are saved here automatically.
+                    </p>
+                  </div>
+                ) : (
+                  <ul className="space-y-1">
+                    {drafts.map((draft) => {
+                      const isActive = draft._id === draftId;
+                      return (
+                        <li key={draft._id}>
+                          <button
+                            type="button"
+                            onClick={() => handleLoadDraft(draft)}
+                            className={`w-full rounded-xl border px-3 py-2.5 text-left transition ${
+                              isActive
+                                ? 'border-black bg-[#F5F5F5]'
+                                : 'border-transparent hover:border-[#E5E5E5] hover:bg-[#F5F5F5]'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="truncate text-xs font-semibold text-[#1A1A1A]">
+                                {draft.documentType}
+                              </span>
+                              <span className="shrink-0 text-[9px] font-medium uppercase tracking-wide text-gray-400">
+                                {formatDate(draft.updatedAt || draft.createdAt)}
+                              </span>
+                            </div>
+                            <p className="mt-0.5 line-clamp-1 text-[10px] text-gray-500">
+                              {draft.instructions || 'No instructions saved'}
+                            </p>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            </section>
+          </aside>
+
+          {/* ── Right column: editor + actions ───────────────────────────── */}
+          <section className="min-w-0">
+            <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-[#E5E5E5] bg-white shadow-sm">
+              <div className="border-b border-[#E5E5E5] px-4 py-4 sm:px-5">
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="flex items-center gap-2 text-sm font-bold">
+                        <Scale size={16} strokeWidth={1.9} aria-hidden="true" />
+                        Generated Draft
+                      </h2>
+                      <span className="rounded-full border border-[#E5E5E5] bg-[#F5F5F5] px-2.5 py-0.5 text-[10px] font-semibold text-gray-600">
+                        {documentType}
+                      </span>
+                      {draftId && (
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
+                            isDirty
+                              ? 'border border-amber-200 bg-amber-50 text-amber-700'
+                              : 'border border-emerald-200 bg-emerald-50 text-emerald-700'
+                          }`}
+                        >
+                          {isDirty ? 'Unsaved changes' : 'Saved'}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 text-[11px] text-gray-500">
+                      {content
+                        ? `${words} ${words === 1 ? 'word' : 'words'} · ${content.length} characters`
+                        : 'Your AI-generated draft will appear here. You can edit it freely.'}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleAiEdit('improve')}
+                      disabled={!content.trim() || busy}
+                      title="Make the draft more formal and persuasive"
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-[#E5E5E5] bg-white px-3 py-2 text-xs font-semibold text-black transition hover:bg-[#F5F5F5] disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {editAction === 'improve' ? (
+                        <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Wand2 size={14} aria-hidden="true" />
+                      )}
+                      {editAction === 'improve' ? 'Improving...' : 'Improve with AI'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleAiEdit('simplify')}
+                      disabled={!content.trim() || busy}
+                      title="Simplify the English while keeping the legal meaning"
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-[#E5E5E5] bg-white px-3 py-2 text-xs font-semibold text-black transition hover:bg-[#F5F5F5] disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {editAction === 'simplify' ? (
+                        <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Sparkles size={14} aria-hidden="true" />
+                      )}
+                      {editAction === 'simplify' ? 'Simplifying...' : 'Simplify with AI'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleDownloadPdf}
+                      disabled={!content.trim()}
+                      title="Open the print dialog and save as PDF"
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-[#E5E5E5] bg-white px-3 py-2 text-xs font-semibold text-black transition hover:bg-[#F5F5F5] disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <Printer size={14} aria-hidden="true" />
+                      Download as PDF
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleDownloadWord}
+                      disabled={!content.trim()}
+                      title="Download an editable Word document"
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-black px-3 py-2 text-xs font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300"
+                    >
+                      <Download size={14} aria-hidden="true" />
+                      Download as Word
+                    </button>
+
+                    {isDirty && draftId && (
+                      <button
+                        type="button"
+                        onClick={handleSave}
+                        disabled={saving}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-black bg-black px-3 py-2 text-xs font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {saving ? (
+                          <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+                        ) : (
+                          <Save size={14} aria-hidden="true" />
+                        )}
+                        {saving ? 'Saving...' : 'Save'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {(error || notice) && (
+                <div className="px-4 pt-3 sm:px-5">
+                  {error ? (
+                    <div
+                      role="alert"
+                      className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs text-red-700"
+                    >
+                      <AlertCircle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
+                      <span className="leading-relaxed">{error}</span>
+                    </div>
+                  ) : (
+                    <div
+                      role="status"
+                      className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-xs text-emerald-700"
+                    >
+                      <Check size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
+                      <span className="leading-relaxed">{notice}</span>
+                    </div>
                   )}
                 </div>
               )}
-            </div>
 
-            {/* Word count */}
-            {hasDraft && (
-              <p className="mt-3 text-right text-[11px] text-gray-400">
-                {draftContent.split(/\s+/).filter(Boolean).length.toLocaleString()} words
-                &nbsp;·&nbsp;
-                {draftContent.length.toLocaleString()} characters
-                {draftId && (
-                  <span>
-                    &nbsp;·&nbsp;
-                    <span className="text-green-600">Saved to database</span>
-                  </span>
-                )}
-              </p>
-            )}
-          </div>
+              <div className="flex-1 p-4 sm:p-5">
+                <textarea
+                  id="draft-editor"
+                  value={content}
+                  onChange={(event) => {
+                    setContent(event.target.value);
+                    if (error) setError('');
+                    if (notice) setNotice('');
+                  }}
+                  maxLength={MAX_DRAFT_LENGTH}
+                  spellCheck
+                  placeholder={`The generated legal draft will appear here in editable form.\n\nSelect a document type, describe the case, then click "Generate Draft". You can also paste an existing draft here and use "Improve with AI" or "Simplify with AI".`}
+                  className="h-full min-h-[520px] w-full resize-y rounded-xl border border-[#E5E5E5] bg-[#FCFCFC] p-5 font-serif text-[15px] leading-7 text-[#1A1A1A] outline-none transition placeholder:font-sans placeholder:text-sm placeholder:leading-relaxed placeholder:text-gray-400 focus:border-black focus:bg-white focus:ring-2 focus:ring-black/5 lg:min-h-[660px]"
+                />
+              </div>
+
+              <div className="flex flex-col gap-2 border-t border-[#E5E5E5] px-4 py-3 text-[11px] text-gray-500 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+                <p className="leading-relaxed">
+                  AI drafts are a starting point. Verify all facts, citations and court details
+                  before filing.
+                </p>
+                <div className="flex shrink-0 items-center gap-3">
+                  {content && (
+                    <button
+                      type="button"
+                      onClick={handleCopy}
+                      className="inline-flex items-center gap-1.5 font-semibold text-black transition hover:text-gray-600"
+                    >
+                      {copied ? (
+                        <Check size={13} aria-hidden="true" />
+                      ) : (
+                        <Copy size={13} aria-hidden="true" />
+                      )}
+                      {copied ? 'Copied' : 'Copy'}
+                    </button>
+                  )}
+                  {content && (
+                    <button
+                      type="button"
+                      onClick={handleClear}
+                      className="font-semibold text-gray-500 transition hover:text-black"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
       </div>
-    </div>
+    </main>
   );
 }

@@ -276,6 +276,94 @@ const explainLaw = async (req, res) => {
   }
 };
 
+// ─── AI fallback for the Legal Dictionary ────────────────────────────────────
+// Called only when a term is missing from the local MongoDB dictionary.
+// Returns a structured Pakistani-law definition so the frontend can render the
+// same fields as a seeded term.
+const defineTerm = async (req, res) => {
+  try {
+    const rawTerm = String(req.body?.term ?? req.body?.query ?? '').trim();
+
+    if (!rawTerm) {
+      return res.status(400).json({
+        success: false,
+        message: 'A legal term is required.',
+      });
+    }
+
+    if (rawTerm.length > 120) {
+      return res.status(400).json({
+        success: false,
+        message: 'The term is too long. Please limit it to 120 characters.',
+      });
+    }
+
+    const prompt =
+      `You are a senior Pakistani lawyer. Define the legal term '${rawTerm}' strictly according to Pakistani Law (PPC, CrPC, Constitution of Pakistan). ` +
+      'Provide the English definition, Urdu explanation, and a practical example relevant to Pakistani courts. ' +
+      'If applicable, mention the exact section or act (e.g., Section 302 PPC). ' +
+      'Respond with valid JSON only, using exactly these keys: ' +
+      '{"englishDefinition": "...", "urduExplanation": "...", "example": "..."}. ' +
+      'Do not wrap the JSON in markdown fences and do not add any other text.';
+
+    const rawAnswer = await generateAIResponse(prompt, '', {
+      provider: 'groq',
+      userPrompt: `Define "${rawTerm}" under Pakistani law.`,
+      temperature: 0.2,
+      maxTokens: 1200,
+    });
+
+    // Models sometimes wrap JSON in ```json fences or add a short preamble.
+    // Extract the first {...} block before parsing.
+    const cleaned = String(rawAnswer)
+      .replace(/```json/gi, '')
+      .replace(/```/g, '')
+      .trim();
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    const jsonText = start !== -1 && end > start ? cleaned.slice(start, end + 1) : cleaned;
+
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonText);
+    } catch {
+      // Last-resort fallback: keep the model text as the English definition.
+      parsed = { englishDefinition: cleaned, urduExplanation: '', example: '' };
+    }
+
+    const englishDefinition = String(parsed.englishDefinition || parsed.definition || '').trim();
+    const urduExplanation = String(parsed.urduExplanation || parsed.urdu || '').trim();
+    const example = String(parsed.example || '').trim();
+
+    if (!englishDefinition) {
+      return res.status(502).json({
+        success: false,
+        message: 'The AI did not return a usable definition. Please try again.',
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      source: 'ai',
+      data: {
+        term: rawTerm,
+        englishDefinition,
+        urduExplanation,
+        example,
+        category: 'General',
+        relatedTerms: [],
+        aiGenerated: true,
+      },
+    });
+  } catch (error) {
+    console.error('AI defineTerm error:', error?.message || String(error));
+    return res.status(500).json({
+      success: false,
+      message: error?.message || 'Unable to generate a definition right now.',
+    });
+  }
+};
+
 // ─── Summarize Judgment / Extract Principles (Case Laws module) ─────────────
 // Both take the raw judgment text and respond strictly from it — the same
 // anti-hallucination contract as explain-law.
@@ -313,4 +401,4 @@ const runStrictJudgmentTool = async (req, res, systemPrompt) => {
 const summarizeJudgment = async (req, res) => runStrictJudgmentTool(req, res, SUMMARIZE_SYSTEM_PROMPT);
 const extractPrinciples = async (req, res) => runStrictJudgmentTool(req, res, PRINCIPLES_SYSTEM_PROMPT);
 
-module.exports = { chatWithAI, caseSpecificChat, simpleCaseChat, explainLaw, summarizeJudgment, extractPrinciples };
+module.exports = { chatWithAI, caseSpecificChat, simpleCaseChat, explainLaw, summarizeJudgment, extractPrinciples, defineTerm };

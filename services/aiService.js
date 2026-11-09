@@ -5,7 +5,9 @@ const OpenAI = require('openai');
 const getAIProvider = () => String(process.env.AI_PROVIDER || 'kie').trim().toLowerCase();
 
 const generateAIResponse = async (prompt, context, options = {}) => {
-  const provider = getAIProvider();
+  // Callers may pin a provider (e.g. Legal Drafting prefers Groq when a
+  // GROQ_API_KEY is present) without changing the global AI_PROVIDER.
+  const provider = String(options.provider || getAIProvider()).trim().toLowerCase();
 
   // ==========================================
   // 1. GEMINI PROVIDER

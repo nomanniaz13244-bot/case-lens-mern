@@ -12,14 +12,25 @@ const researchRoutes = require('./routes/researchRoutes');
 const caseLawRoutes = require('./routes/caseLawRoutes');
 const caseRoutes = require('./routes/caseRoutes');
 const draftingRoutes = require('./routes/draftingRoutes');
+const dictionaryRoutes = require('./routes/dictionaryRoutes');
+const { seedDictionary } = require('./scripts/seedDictionary');
 
 // Load environment variables from .env file
 dotenv.config();
 
 console.log(`🤖 AI Provider set to: ${String(process.env.AI_PROVIDER || 'gemini').trim().toLowerCase()}`);
 
-// Connect to MongoDB Atlas
-connectDB();
+// Connect to MongoDB and make sure the Legal Dictionary is populated.
+connectDB()
+  .then(() => seedDictionary({ onlyIfEmpty: true }))
+  .then((result) => {
+    if (result?.seeded) {
+      console.log(`📚 Legal Dictionary auto-seeded with ${result.seeded} terms.`);
+    }
+  })
+  .catch((error) => {
+    console.error(`⚠️ Legal Dictionary auto-seed skipped: ${error.message}`);
+  });
 
 const app = express();
 
@@ -53,7 +64,10 @@ app.use('/api/workspace', workspaceRoutes);
 app.use('/api/research', researchRoutes);
 app.use('/api/case-laws', caseLawRoutes);
 app.use('/api/cases', caseRoutes);
+// Legal Drafting Module
 app.use('/api/drafting', draftingRoutes);
+// Legal Dictionary Module
+app.use('/api/dictionary', dictionaryRoutes);
 // Compatibility mount: admin create-ai also resolves under /api/workspace/create-ai.
 app.use('/api/workspace', adminCaseRoutes);
 
