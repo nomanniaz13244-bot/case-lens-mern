@@ -36,15 +36,56 @@ const getDraftingOptions = (maxTokens) => {
   return options;
 };
 
-const buildGeneratePrompt = (documentType, instructions) => `You are a senior Pakistani lawyer. Generate a formal legal draft for a ${documentType} based on these instructions: ${instructions}. Format it professionally with 'IN THE COURT OF...', 'Subject:', and formal legal paragraphs. Do not invent facts. Keep placeholders like [Client Name] where specific info is missing.
+// Per-document-type scaffolds. The model must CONVERT the user's raw story
+// into the formal structure of the selected document — never repeat it.
+const DOCUMENT_SCAFFOLDS = {
+  'Legal Notice': `- Start with the heading 'LEGAL NOTICE UNDER SECTION 80 CPC' on its own line.
+- Add 'To,' followed by '[Opposite Party Name]' and '[Opposite Party Address]'.
+- Write a 'SUBJECT:' line summarising the grievance in one formal sentence.
+- Under the 'FACTS' heading, translate the user's story into formal legal English (use terms like 'herein', 'whereas', 'my client', 'breach of contract', 'illegal and malafide conduct'). Do NOT repeat the raw story as informal speech.
+- Add a 'LEGAL GROUNDS' section citing the relevant Acts/Sections that apply (e.g., Contract Act 1872; if the facts suggest refund/damages, cite the appropriate sections; do not invent sections that do not exist).
+- End with a strict 15-day demand stating exactly what the client requires within that period, followed by a warning that failing to comply the client will initiate appropriate legal proceedings, civil and/or criminal, at the addressee's risk, cost and consequences.
+- Close with 'Yours faithfully,' and a dated signature block for [Advocate Name], [Advocate High Court], on behalf of [Client Name].`,
+  'Civil Petition': `- Start with 'IN THE COURT OF [Name of Court]' on its own line, followed by the jurisdiction line.
+- Add the 'PETITION NO. [___] OF [Year]' and the styled parties line: '[Client Name] ... Petitioner VERSUS [Opposite Party] ... Respondents'.
+- Write a 'RESPECTFULLY SHEWETH:' section converting the user's story into numbered formal paragraphs (use 'body'/facts language like 'herein', 'whereas', 'the petitioner submits').
+- Add a 'GROUNDS' section citing the relevant Acts/Sections (do not invent sections).
+- End with 'PRAYER:' asking the court for the specific relief strictly derived from the user's story, then 'Humbly prayed that...'.
+- Close with a verification block and dated signature block for [Advocate Name] / [Client Name].`,
+  'Constitutional Petition': `- Start with 'IN THE ISLAMABAD HIGH COURT / [Name of Court]' on its own line.
+- Add the styled line: '[Client Name] ... Petitioner VERSUS Federation of Pakistan / [Authority] ... Respondents' and 'CONSTITUTIONAL PETITION No. [___] OF [Year]' under Article 199 of the Constitution of the Islamic Republic of Pakistan, 1973 (or Article 184(3) where the facts involve a matter of public importance).
+- Convert the user's story into numbered formal paragraphs describing the impugned action, the legal right violated, and the arbitrariness/ultra vires character of the action.
+- Cite the relevant constitutional Articles (e.g., Articles 4, 10-A, 14, 24) ONLY where genuinely supported by the facts supplied.
+- End with 'PRAYER:' listing the declarations and directions sought.
+- Close with a dated signature block for [Advocate Name].`,
+  'Court Application': `- Start with 'IN THE COURT OF [Name of Court]' on its own line, followed by the case style: '[Client Name] ... Applicant VERSUS [Opposite Party] ... Respondents' and the application title (e.g., 'APPLICATION UNDER SECTION [___] OF [Act]').
+- Convert the user's story into numbered formal paragraphs (use 'it is submitted that', 'whereas').
+- Cite the relevant Act/Section the application is brought under — always use a [Section] placeholder unless the facts make the section unambiguous.
+- End with 'PRAYER:' and 'It is therefore most respectfully prayed that this Hon'ble Court may graciously be pleased to...' stating the specific relief.
+- Close with 'Humbly submitted.' and a dated signature block for [Advocate Name] / [Client Name].`,
+  'Basic Agreement': `- Start with the heading 'AGREEMENT' on its own line, followed by 'This Agreement is made on this [___] day of [Month], [Year] at [City]'.
+- Add the parties recital: 'BETWEEN [Client Name], s/o [___], resident of [___] (hereinafter referred to as the "First Party") AND [Opposite Party Name] (hereinafter referred to as the "Second Party")'.
+- Add a 'WHEREAS' recital section converting the user's story into formal recitals.
+- Number the operative clauses (1, 2, 3...) covering consideration, performance obligations, timelines, and payment terms strictly derived from the user's story.
+- Add standard formal clauses: governing law ('Laws of the Islamic Republic of Pakistan'), dispute resolution, Force Majeure, and signatures.
+- Close with signature blocks for both parties plus two [Witness Name] witnesses.`,
+};
 
-Additional Pakistani drafting rules:
-- Use formal Pakistani legal conventions and terminology (e.g. "MOST RESPECTFULLY SHOWETH", "It is respectfully prayed that", "PRAYER", "VERIFICATION", "DEPONENT").
-- For documents that are not filed in court (Legal Notice, Basic Agreement), use an appropriate formal heading such as "LEGAL NOTICE" or "AGREEMENT" instead of "IN THE COURT OF...".
-- Include a "Subject:" line, numbered paragraphs, and a prayer/relief clause where applicable.
-- Include dated signature blocks with bracketed placeholders (e.g. [Advocate Name], [Client Name], [Date]).
-- Never invent names, dates, amounts, statutory sections, or facts. Use bracketed placeholders such as [Client Name], [Opposite Party], [Court], [Date], [Amount], [Section] whenever the information is missing.
-- Return ONLY the finished draft text. Do not include explanations, commentary, markdown code fences, or notes.`;
+const buildGeneratePrompt = (documentType, instructions) => `You are a senior Pakistani Advocate. The user will provide raw facts or instructions. You must DRAFT a formal ${documentType}.
+
+CRITICAL RULE — CONVERT, DO NOT REPEAT:
+- The user's story is raw input, never part of the final document. Rephrase it into formal legal English with proper pleading language.
+- Do NOT copy the user's sentences, quotations, tone, or phrasing into the draft. Transform them: first-person client narration becomes third-person pleading language ('my client' becomes 'the complainant'/'the petitioner', 'he didn't deliver the goods' becomes 'the respondent failed, neglected and refused to deliver the contracted goods').
+
+Structure — follow the document scaffold exactly:
+${DOCUMENT_SCAFFOLDS[documentType] || DOCUMENT_SCAFFOLDS['Legal Notice']}
+
+Universally applicable Pakistani drafting rules:
+- Use formal Pakistani legal conventions ("MOST RESPECTFULLY SHOWETH", "It is respectfully prayed that", "PRAYER", "VERIFICATION", "Yours faithfully").
+- Every case-specific fact must remain exactly as given by the user — never invent names, dates, amounts, statutory sections or facts. Use bracketed placeholders such as [Client Name], [Opposite Party], [Court], [Date], [Amount], [Section] whenever information is missing, keeping the user's given facts in place of the relevant placeholders.
+- Formatting: output clean plain-text paragraphs with proper spacing. Blank line between every block. Headings (SUBJECT, FACTS, LEGAL GROUNDS, PRAYER, VERIFICATION) in UPPERCASE on their own line. Numbered clauses as '1.', '2.', '3.'. Keep sentences inside paragraphs on connected lines, never one-clause-per-line.
+- Do NOT use markdown syntax: no '#', '##', no **bold**, no bullet characters '*', '-', no code fences.
+- Return ONLY the finished draft text. Do not include explanations, commentary, or notes.`;
 
 const buildEditPrompt = (instruction) => `You are a legal editor. Modify the following text according to this instruction: ${instruction}.
 
@@ -94,12 +135,17 @@ const generateDraft = async (req, res) => {
 
     const systemPrompt = buildGeneratePrompt(documentType, instructions);
 
+    console.log(
+      `Draft generate request — type: "${documentType}" | instructions length: ${instructions.length}`
+    );
+    console.log('Raw instructions sent to AI:', instructions);
+
     const generatedContent = await generateAIResponse(
       systemPrompt,
-      '',
+      instructions,
       {
-        userPrompt: `Generate the ${documentType} now, strictly following the instructions and drafting rules.`,
-        ...getDraftingOptions(4000),
+        userPrompt: `RAW FACTS FROM THE CLIENT:\n${instructions}\n\nDraft the formal ${documentType} now. Convert the raw facts above into the full professional format: do not repeat the client's words.`,
+        ...getDraftingOptions(8000),
       }
     );
 
