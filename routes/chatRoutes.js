@@ -6,6 +6,7 @@ const {
   getHistory,
   getSession,
   deleteSession,
+  toggleSessionPin,
 } = require('../controllers/chatSessionController');
 const { protect } = require('../middleware/authMiddleware');
 
@@ -15,6 +16,7 @@ const { protect } = require('../middleware/authMiddleware');
 router.post('/new', protect, createSession);
 router.get('/history', protect, getHistory);
 router.get('/:id', protect, getSession);
+router.patch('/:id/pin', protect, toggleSessionPin);
 router.delete('/:id', protect, deleteSession);
 
 module.exports = router;

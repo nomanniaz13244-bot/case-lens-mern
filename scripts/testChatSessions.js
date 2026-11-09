@@ -87,11 +87,21 @@ const assert = (condition, label) => {
   assert(msgs[1]?.role === 'assistant' && (msgs[1]?.text || '').length > 0, 'second message is the assistant answer');
   assert((fetched.body?.data?.title || '').length > 0, `title auto-generated: "${fetched.body?.data?.title}"`);
 
-  // 5) Delete the session
+  // 5) Pin the session, verify, unpin, verify
+  const pinOn = await request('PATCH', `/api/chat/${sessionId}/pin`, {}, token);
+  assert(pinOn.status === 200, `PATCH /:id/pin (on) -> ${pinOn.status}`);
+  assert(pinOn.body?.data?.isPinned === true, 'pin toggled to true');
+  const historyPin = await request('GET', '/api/chat/history', null, token);
+  const pinnedRow = (historyPin.body?.data || []).find((s) => String(s._id) === String(sessionId));
+  assert(pinnedRow?.isPinned === true, 'history exposes isPinned=true');
+  const pinOff = await request('PATCH', `/api/chat/${sessionId}/pin`, {}, token);
+  assert(pinOff.status === 200 && pinOff.body?.data?.isPinned === false, 'pin toggled back to false');
+
+  // 6) Delete the session
   const del = await request('DELETE', `/api/chat/${sessionId}`, null, token);
   assert(del.status === 200, `DELETE /api/chat/:id -> ${del.status}`);
 
-  // 6) Re-delete -> 404, and gone from history
+  // 7) Re-delete -> 404, and gone from history
   const reDel = await request('DELETE', `/api/chat/${sessionId}`, null, token);
   assert(reDel.status === 404, `re-delete -> ${reDel.status} (expect 404)`);
   const history2 = await request('GET', '/api/chat/history', null, token);

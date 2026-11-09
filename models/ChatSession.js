@@ -51,6 +51,12 @@ const chatSessionSchema = new mongoose.Schema(
       maxlength: [120, 'Chat titles are limited to 120 characters'],
     },
 
+    // Pinned chats float to the top of the history sidebar.
+    isPinned: {
+      type: Boolean,
+      default: false,
+    },
+
     messages: {
       type: [chatMessageSchema],
       default: [],
@@ -61,8 +67,9 @@ const chatSessionSchema = new mongoose.Schema(
   }
 );
 
-// History sidebar ordering: a user's sessions, most recently active first.
-chatSessionSchema.index({ userId: 1, updatedAt: -1 });
+// History sidebar ordering: a user's sessions, pinned first then most
+// recently active.
+chatSessionSchema.index({ userId: 1, isPinned: -1, updatedAt: -1 });
 
 const ChatSession = mongoose.model('ChatSession', chatSessionSchema);
 

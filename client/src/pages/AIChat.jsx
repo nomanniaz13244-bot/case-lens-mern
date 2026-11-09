@@ -1,6 +1,16 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { MoreVertical, Plus, Trash2, X } from 'lucide-react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  MessageSquare,
+  MoreVertical,
+  Pin,
+  PinOff,
+  Plus,
+  Trash2,
+  X,
+} from 'lucide-react';
 
 const AI_API_URL = '/api/ai/chat';
 const CHAT_HISTORY_URL = '/api/chat/history';
@@ -53,11 +63,13 @@ How can I assist your legal matter today?`,
   const [copiedId, setCopiedId] = useState(null);
 
   // ─── Chat-history state ────────────────────────────────────────────────────
-  const [sessions, setSessions] = useState([]); // { _id, title, updatedAt }
+  const [sessions, setSessions] = useState([]); // { _id, title, isPinned, updatedAt }
   const [activeSessionId, setActiveSessionId] = useState(null); // null = fresh unsaved chat
   const [loadingSessions, setLoadingSessions] = useState(true);
   const [openMenuId, setOpenMenuId] = useState(null); // 3-dots menu
   const [confirmDeleteId, setConfirmDeleteId] = useState(null); // inline delete confirmation
+  const [pinnedBusyId, setPinnedBusyId] = useState(null); // pin toggle in flight
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true); // history sidebar expanded?
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -275,6 +287,27 @@ How can I assist your legal matter today?`,
     }
   };
 
+  const handleTogglePin = async (sessionId) => {
+    setOpenMenuId(null);
+    if (pinnedBusyId) return;
+
+    setPinnedBusyId(sessionId);
+    try {
+      await axios.patch(
+        `${CHAT_SESSION_URL}/${sessionId}/pin`,
+        {},
+        { timeout: 20000 }
+      );
+      // The backend sorts pinned chats first — refetch to reflect the order.
+      await fetchHistory();
+      setToast('Pin status updated.');
+    } catch {
+      setToast('Could not update the pin status. Please try again.');
+    } finally {
+      setPinnedBusyId(null);
+    }
+  };
+
   const handleDeleteSession = async (sessionId) => {
     setConfirmDeleteId(null);
     setOpenMenuId(null);
@@ -319,135 +352,223 @@ How can Case Lens AI assist you with case precedents, legal research, or draftin
 
   return (
     <div className="flex h-screen bg-[#F5F5F5] text-[#1A1A1A] font-sans overflow-hidden">
-      {/* ─── LEFT: Chat History Sidebar (ChatGPT-style) ──────────────────────── */}
-      <aside className="hidden w-[260px] flex-shrink-0 flex-col border-r border-gray-200 bg-white md:flex md:flex-col">
-        <div className="p-3">
+      {/* ─── LEFT: Chat History Sidebar (collapsible, ChatGPT-style) ─────────── */}
+      <aside
+        className={`hidden flex-shrink-0 flex-col overflow-hidden border-r border-gray-200 bg-white transition-all duration-300 md:flex ${
+          isSidebarOpen ? 'w-64' : 'w-16'
+        }`}
+      >
+        <div className={`p-3 ${isSidebarOpen ? 'space-y-2' : 'space-y-2'}`}>
+          {/* Collapse/Expand toggle */}
+          <button
+            type="button"
+            onClick={() => setIsSidebarOpen((open) => !open)}
+            aria-label={isSidebarOpen ? 'Collapse chat history' : 'Expand chat history'}
+            title={isSidebarOpen ? 'Collapse chat history' : 'Expand chat history'}
+            className="flex h-9 w-full items-center justify-center rounded-lg text-gray-500 transition hover:bg-[#F5F5F5] hover:text-[#1A1A1A]"
+          >
+            {isSidebarOpen ? (
+              <ChevronRight size={17} strokeWidth={2.2} aria-hidden="true" />
+            ) : (
+              <ChevronLeft size={17} strokeWidth={2.2} aria-hidden="true" />
+            )}
+          </button>
+
+          {/* New Chat */}
           <button
             type="button"
             onClick={handleNewChat}
             disabled={isTyping}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-black px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-gray-800 disabled:opacity-50"
+            title="New Chat"
+            className={`flex items-center justify-center rounded-xl bg-black text-sm font-bold text-white shadow-sm transition hover:bg-gray-800 disabled:opacity-50 ${
+              isSidebarOpen ? 'w-full gap-2 px-4 py-3' : 'h-9 w-9 text-transparent'
+            }`}
           >
             <Plus size={16} strokeWidth={2.5} aria-hidden="true" />
-            New Chat
+            {isSidebarOpen && 'New Chat'}
           </button>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-2 pb-4" aria-label="Chat history">
-          {loadingSessions ? (
-            <div className="flex items-center justify-center gap-2 px-3 py-8 text-xs text-gray-500">
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-700" />
-              Loading history...
-            </div>
-          ) : sessions.length === 0 ? (
-            <div className="px-3 py-8 text-center">
-              <p className="text-xs font-semibold text-gray-600">No conversations yet</p>
-              <p className="mt-1 text-[10px] leading-relaxed text-gray-400">
-                Ask a question and the chat will be saved here automatically.
-              </p>
-            </div>
-          ) : (
-            groupSessionsByDate(sessions).map(([groupLabel, groupItems]) => (
-              <div key={groupLabel} className="mb-4">
-                <p className="mb-1.5 px-3 text-[9px] font-bold uppercase tracking-[0.18em] text-gray-500">
-                  {groupLabel}
+        {isSidebarOpen ? (
+          <nav className="flex-1 overflow-y-auto px-2 pb-4" aria-label="Chat history">
+            {loadingSessions ? (
+              <div className="flex items-center justify-center gap-2 px-3 py-8 text-xs text-gray-500">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-700" />
+                Loading history...
+              </div>
+            ) : sessions.length === 0 ? (
+              <div className="px-3 py-8 text-center">
+                <p className="text-xs font-semibold text-gray-600">No conversations yet</p>
+                <p className="mt-1 text-[10px] leading-relaxed text-gray-400">
+                  Ask a question and the chat will be saved here automatically.
                 </p>
-                <div className="space-y-0.5">
-                  {groupItems.map((session) => {
-                    const isActive = session._id === activeSessionId;
-                    const isMenuOpen = openMenuId === session._id;
-                    const isDeleteActive = confirmDeleteId === session._id;
-                    return (
-                      <div
-                        key={session._id}
-                        className={`relative flex items-stretch gap-0 rounded-lg transition ${
-                          isActive ? 'bg-gray-200' : 'hover:bg-[#F5F5F5]'
-                        }`}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => handleSelectSession(session._id)}
-                          className="min-w-0 flex-1 rounded-l-lg px-3 py-2.5 text-left"
+              </div>
+            ) : (
+              groupSessionsByDate(sessions).map(([groupLabel, groupItems]) => (
+                <div key={groupLabel} className="mb-4">
+                  <p className="mb-1.5 px-3 text-[9px] font-bold uppercase tracking-[0.18em] text-gray-500">
+                    {groupLabel}
+                  </p>
+                  <div className="space-y-0.5">
+                    {groupItems.map((session) => {
+                      const isActive = session._id === activeSessionId;
+                      const isMenuOpen = openMenuId === session._id;
+                      const isDeleteActive = confirmDeleteId === session._id;
+                      const isPinning = pinnedBusyId === session._id;
+                      return (
+                        <div
+                          key={session._id}
+                          className={`group relative flex items-stretch gap-0 rounded-lg transition ${
+                            isActive ? 'bg-gray-200' : 'hover:bg-[#F5F5F5]'
+                          }`}
                         >
-                          <p
-                            className={`truncate text-xs font-semibold ${
-                              isActive ? 'text-black' : 'text-[#1A1A1A]'
-                            }`}
-                            title={session.title}
-                          >
-                            {session.title || 'New Chat'}
-                          </p>
-                          <p className="mt-0.5 truncate text-[10px] text-gray-500">
-                            {new Date(session.updatedAt || session.createdAt).toLocaleDateString(
-                              undefined,
-                              { day: '2-digit', month: 'short' }
-                            )}
-                          </p>
-                        </button>
-
-                        {/* 3-dots menu: Delete */}
-                        <div className="relative flex items-center pr-1" data-session-menu>
                           <button
                             type="button"
-                            aria-label={`Options for chat "${session.title || 'New Chat'}"`}
-                            title="Chat options"
-                            onClick={() => setOpenMenuId(isMenuOpen ? null : session._id)}
-                            className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-300 hover:text-gray-700"
+                            onClick={() => handleSelectSession(session._id)}
+                            className="min-w-0 flex-1 rounded-l-lg px-3 py-2.5 text-left"
                           >
-                            <MoreVertical size={14} strokeWidth={2} aria-hidden="true" />
+                            <p
+                              className={`flex min-w-0 items-center gap-1.5 text-xs font-semibold ${
+                                isActive ? 'text-black' : 'text-[#1A1A1A]'
+                              }`}
+                              title={session.title}
+                            >
+                              <span className="truncate">
+                                {session.title || 'New Chat'}
+                              </span>
+                              {session.isPinned && (
+                                <Pin
+                                  size={11}
+                                  className="shrink-0 fill-amber-400 text-amber-500"
+                                  aria-label="Pinned chat"
+                                />
+                              )}
+                            </p>
+                            <p className="mt-0.5 truncate text-[10px] text-gray-500">
+                              {new Date(session.updatedAt || session.createdAt).toLocaleDateString(
+                                undefined,
+                                { day: '2-digit', month: 'short' }
+                              )}
+                            </p>
                           </button>
 
-                          {isMenuOpen && (
-                            <div className="absolute right-0 top-full z-30 mt-1 w-36 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg">
+                          {/* 3-dots menu — appears on hover */}
+                          <div className="relative flex items-center pr-1" data-session-menu>
+                            <button
+                              type="button"
+                              aria-label={`Options for chat "${session.title || 'New Chat'}"`}
+                              title="Chat options"
+                              onClick={() => setOpenMenuId(isMenuOpen ? null : session._id)}
+                              className="rounded-lg p-1.5 text-gray-400 opacity-0 transition hover:bg-gray-300 hover:text-gray-700 focus:opacity-100 group-hover:opacity-100"
+                            >
+                              <MoreVertical size={14} strokeWidth={2} aria-hidden="true" />
+                            </button>
+
+                            {isMenuOpen && (
+                              <div className="absolute right-0 top-full z-30 mt-1 w-36 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg">
+                                <button
+                                  type="button"
+                                  disabled={isPinning}
+                                  onClick={() => handleTogglePin(session._id)}
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] font-semibold text-[#1A1A1A] transition hover:bg-[#F5F5F5] disabled:opacity-50"
+                                >
+                                  {isPinning ? (
+                                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-gray-700" />
+                                  ) : session.isPinned ? (
+                                    <PinOff size={13} strokeWidth={2} aria-hidden="true" />
+                                  ) : (
+                                    <Pin size={13} strokeWidth={2} aria-hidden="true" />
+                                  )}
+                                  {session.isPinned ? 'Unpin' : 'Pin'}
+                                </button>
+                                <div className="my-1 h-px bg-[#E5E5E5]" />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenMenuId(null);
+                                    setConfirmDeleteId(session._id);
+                                  }}
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] font-semibold text-red-600 transition hover:bg-red-50"
+                                >
+                                  <Trash2 size={13} strokeWidth={2} aria-hidden="true" />
+                                  Delete
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Inline delete confirmation */}
+                          {isDeleteActive && (
+                            <div className="absolute inset-0 z-20 flex items-center justify-center gap-1.5 rounded-lg bg-white/95 px-2 shadow-sm ring-1 ring-red-200">
+                              <span className="max-w-[80px] truncate text-[10px] font-semibold text-gray-700">
+                                Delete?
+                              </span>
                               <button
                                 type="button"
-                                onClick={() => {
-                                  setOpenMenuId(null);
-                                  setConfirmDeleteId(session._id);
-                                }}
-                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] font-semibold text-red-600 transition hover:bg-red-50"
+                                onClick={() => handleDeleteSession(session._id)}
+                                className="rounded-lg bg-red-600 px-2.5 py-1 text-[10px] font-bold text-white transition hover:bg-red-700"
                               >
-                                <Trash2 size={13} strokeWidth={2} aria-hidden="true" />
-                                Delete
+                                Yes
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteId(null)}
+                                className="flex items-center rounded-lg border border-gray-300 p-1 text-gray-600 transition hover:bg-gray-100"
+                                aria-label="Cancel delete"
+                              >
+                                <X size={11} strokeWidth={2.5} aria-hidden="true" />
                               </button>
                             </div>
                           )}
                         </div>
-
-                        {/* Inline delete confirmation */}
-                        {isDeleteActive && (
-                          <div className="absolute inset-0 z-20 flex items-center justify-center gap-1.5 rounded-lg bg-white/95 px-2 shadow-sm ring-1 ring-red-200">
-                            <span className="max-w-[80px] truncate text-[10px] font-semibold text-gray-700">
-                              Delete?
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteSession(session._id)}
-                              className="rounded-lg bg-red-600 px-2.5 py-1 text-[10px] font-bold text-white transition hover:bg-red-700"
-                            >
-                              Yes
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setConfirmDeleteId(null)}
-                              className="flex items-center rounded-lg border border-gray-300 p-1 text-gray-600 transition hover:bg-gray-100"
-                              aria-label="Cancel delete"
-                            >
-                              <X size={11} strokeWidth={2.5} aria-hidden="true" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
+              ))
+            )}
+          </nav>
+        ) : (
+          /* ── Collapsed: icon-only session shortcuts ─────────────────────── */
+          <nav className="flex-1 overflow-y-auto px-2 pb-4" aria-label="Chat history (collapsed)">
+            {sessions.length === 0 ? (
+              <p className="px-2 py-6 text-center text-[10px] leading-relaxed text-gray-400">
+                No chats yet
+              </p>
+            ) : (
+              <div className="space-y-0.5">
+                {sessions.slice(0, 12).map((session) => {
+                  const isActive = session._id === activeSessionId;
+                  return (
+                    <button
+                      key={session._id}
+                      type="button"
+                      title={session.title || 'New Chat'}
+                      onClick={() => handleSelectSession(session._id)}
+                      className={`relative flex h-9 w-9 items-center justify-center rounded-lg transition ${
+                        isActive
+                          ? 'bg-gray-200 text-black'
+                          : 'text-gray-500 hover:bg-[#F5F5F5] hover:text-[#1A1A1A]'
+                      }`}
+                    >
+                      <MessageSquare size={16} strokeWidth={1.9} aria-hidden="true" />
+                      {session.isPinned && (
+                        <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-amber-500" />
+                      )}
+                    </button>
+                  );
+                })}
               </div>
-            ))
-          )}
-        </nav>
+            )}
+          </nav>
+        )}
 
-        <div className="border-t border-gray-200 px-4 py-3 text-[10px] text-gray-500">
-          Chat history is saved automatically
+        <div
+          className={`border-t border-gray-200 text-[10px] text-gray-500 ${
+            isSidebarOpen ? 'px-4 py-3' : 'flex h-10 items-center justify-center'
+          }`}
+        >
+          {isSidebarOpen ? 'Chat history is saved automatically' : '📜'}
         </div>
       </aside>
 
